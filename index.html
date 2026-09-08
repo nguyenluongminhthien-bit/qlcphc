@@ -1,0 +1,1454 @@
+<!DOCTYPE html>
+<html lang="vi">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quản trị Chi phí Hành chính - THACO AUTO</title>
+    <!-- TailwindCSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        thaco: {
+                            blue: '#00529C',    // RGB 0:82:156 THACO Corporate Royal Blue
+                            darkblue: '#003870',
+                            navy: '#002855',
+                            cream: '#FFFFD4',   // RGB 255:255:212 THACO Warm Yellow / Ivory
+                            yellow: '#FEF3C7',
+                            softyellow: '#FFFBEB',
+                            gold: '#D97706'
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <!-- SheetJS CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <!-- Chart.js CDN for Visual Dashboard -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        /* Custom scrollbar and light table aesthetics */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: #f1f5f9;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8;
+        }
+
+        .table-container {
+            max-height: calc(100vh - 290px);
+            overflow: auto;
+            position: relative;
+        }
+
+        /* Sticky Header - Solid background and clean scroll overlay */
+        thead {
+            position: sticky;
+            top: 0;
+            z-index: 30;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        }
+
+        thead tr {
+            background-color: #00529C;
+        }
+
+        thead th {
+            position: sticky;
+            top: 0;
+            z-index: 20;
+            background-clip: padding-box;
+        }
+
+        /* Freeze first 4 columns */
+        .sticky-col-1 {
+            position: sticky;
+            left: 0;
+            z-index: 10;
+        }
+
+        .sticky-col-2 {
+            position: sticky;
+            left: 36px;
+            z-index: 10;
+        }
+
+        .sticky-col-3 {
+            position: sticky;
+            left: 136px;
+            z-index: 10;
+        }
+
+        .sticky-col-4 {
+            position: sticky;
+            left: 216px;
+            z-index: 10;
+        }
+
+        thead th.sticky-col-1,
+        thead th.sticky-col-2,
+        thead th.sticky-col-3,
+        thead th.sticky-col-4 {
+            z-index: 40;
+        }
+    </style>
+</head>
+
+<body class="bg-slate-100 text-slate-800 min-h-screen font-sans antialiased flex flex-col">
+
+    <!-- Top Navigation Bar -->
+    <header
+        class="bg-gradient-to-r from-[#00529C] via-[#004080] to-[#002D62] text-white border-b border-blue-900/40 shadow-md px-6 py-3 flex flex-wrap items-center justify-between gap-4">
+        <div class="flex items-center space-x-4">
+            <div
+                class="bg-white/15 p-2 rounded-xl border border-white/30 shadow-inner flex items-center justify-center">
+                <span class="text-xl font-black tracking-widest text-white">QTVP-ASĐS</span>
+            </div>
+            <div>
+                <h1 class="text-lg font-bold text-white tracking-tight flex items-center gap-2">
+                    HỆ THỐNG QUẢN TRỊ CHI PHÍ HÀNH CHÍNH
+                    <span
+                        class="text-[11px] bg-[#FFFFD4]/20 text-[#FFFFD4] border border-[#FFFFD4]/40 px-2 py-0.5 rounded-full font-medium">B7
+                        ↔ B10 & AI Forecast</span>
+                </h1>
+                <p class="text-xs text-blue-100/90" id="scope-badge-desc">
+                    Cơ cấu Hiện hành 2026 (Chuẩn so sánh cùng quy mô)
+                </p>
+            </div>
+        </div>
+
+        <!-- Action Buttons -->
+        <div class="flex items-center gap-2.5">
+            <button id="btn-export-excel"
+                class="flex items-center gap-1.5 px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-lg shadow transition-all">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+                Xuất báo cáo
+            </button>
+            <button
+                onclick="if(window.THACO_APP && window.THACO_APP.openUploadModal){window.THACO_APP.openUploadModal();}else{document.getElementById('upload-modal').classList.remove('hidden');}"
+                class="flex items-center gap-1.5 px-3.5 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-extrabold rounded-lg shadow transition-all">
+                <svg class="w-4 h-4 text-slate-950" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5"
+                        d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                </svg>
+                Nạp data chi phí
+            </button>
+            <button id="btn-reset-storage" title="Khôi phục về dữ liệu nguồn ban đầu"
+                class="p-1.5 bg-white/20 hover:bg-rose-600 text-white border border-white/30 rounded-lg transition-all">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+            </button>
+        </div>
+    </header>
+
+    <!-- Smart Slicers Control Bar (Nền Trắng Sáng) - Đặt phía trên Nhãn Thống kê -->
+    <div class="bg-white border-b border-slate-200 px-6 py-3 shadow-sm">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+            <!-- Slicer Controls -->
+            <div class="flex flex-wrap items-center gap-2.5 text-xs">
+                <!-- Slicer Đơn Vị (Gộp Slicer Miền & Slicer Khối) -->
+                <div>
+                    <label class="block text-[10px] font-bold text-slate-600 uppercase mb-0.5">Đơn vị</label>
+                    <select id="slicer-donvi"
+                        class="bg-blue-50/80 border border-blue-300 rounded-lg px-2.5 py-1.5 text-[#00529C] focus:outline-none focus:ring-2 focus:ring-[#00529C] font-bold">
+                        <option value="ALL">-- Tất cả Đơn vị --</option>
+                        <option value="KHOI_VPDH">VPĐH</option>
+                        <option value="KHOI_NHAMAY">Nhà máy</option>
+                        <option value="KHOI_MB">CTTT Phía Bắc</option>
+                        <option value="KHOI_MN">CTTT Phía Nam</option>
+                    </select>
+                </div>
+
+                <!-- Slicer Đơn vị Quản Trị -->
+                <div>
+                    <label class="block text-[10px] font-bold text-slate-600 uppercase mb-0.5">Đơn vị Quản trị</label>
+                    <select id="slicer-quantri"
+                        class="bg-slate-50 border border-slate-300 rounded-lg px-2.5 py-1.5 text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#00529C] font-medium max-w-xs truncate">
+                        <option value="ALL">-- Tất cả Đơn vị Quản trị --</option>
+                    </select>
+                </div>
+
+                <!-- Slicer Pháp Nhân -->
+                <div>
+                    <label class="block text-[10px] font-bold text-slate-600 uppercase mb-0.5">Pháp nhân cụ thể</label>
+                    <select id="slicer-phapnhan"
+                        class="bg-slate-50 border border-slate-300 rounded-lg px-2.5 py-1.5 text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#00529C] font-medium max-w-xs truncate">
+                        <option value="ALL">-- Tất cả Pháp nhân --</option>
+                    </select>
+                </div>
+
+                <!-- Slicer Bộ phận / Khối phòng ban -->
+                <div>
+                    <label class="block text-[10px] font-bold text-slate-600 uppercase mb-0.5">Bộ phận / Khối</label>
+                    <select id="slicer-bophan"
+                        class="bg-blue-50/70 border border-blue-200 rounded-lg px-2.5 py-1.5 text-[#00529C] focus:outline-none focus:ring-2 focus:ring-[#00529C] font-semibold max-w-xs truncate">
+                        <option value="ALL">-- Tất cả Bộ phận --</option>
+                    </select>
+                </div>
+
+                <!-- Slicer Tài Khoản -->
+                <div>
+                    <label class="block text-[10px] font-bold text-slate-600 uppercase mb-0.5">Tài khoản</label>
+                    <select id="slicer-taikhoan"
+                        class="bg-slate-50 border border-slate-300 rounded-lg px-2.5 py-1.5 text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#00529C] font-medium">
+                        <option value="ALL">Tất cả (TK 641 + 642)</option>
+                        <option value="641">TK 641 - CP Bán hàng</option>
+                        <option value="642">TK 642 - CP QLDN</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- Scope Mode & View Switcher -->
+            <div class="flex flex-wrap items-center gap-2">
+                <!-- Role / View Switcher -->
+                <div class="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200">
+                    <button id="btn-view-macro"
+                        class="px-2.5 py-1 text-xs font-bold rounded-lg bg-[#00529C] text-white shadow-sm transition-all">
+                        Ban Lãnh Đạo (Macro)
+                    </button>
+                    <button id="btn-view-micro"
+                        class="px-2.5 py-1 text-xs font-medium rounded-lg bg-white text-slate-700 hover:bg-slate-50 border border-slate-200 transition-all">
+                        Giám Đốc Đơn Vị (Micro)
+                    </button>
+                </div>
+
+                <!-- Scope Mode Switch (Đã hợp nhất theo nguyên tắc quản trị hiện hành) -->
+            </div>
+        </div>
+
+        <!-- Secondary Toolbar: FlyonUI Tab Bar -->
+        <div class="flex flex-wrap items-center justify-between gap-3 mt-2.5 pt-2.5 border-t border-slate-200 text-xs">
+            <!-- Tabs Nav (FlyonUI Style with Sliding Indicator) -->
+            <nav id="app-tabs-nav"
+                class="relative flex flex-nowrap items-center bg-slate-100/90 p-1 rounded-xl border border-slate-200/90 shadow-inner overflow-x-auto no-scrollbar whitespace-nowrap shrink-0 max-w-full">
+                <!-- Sliding Active Indicator -->
+                <div id="tab-indicator"
+                    class="absolute top-1 bottom-1 bg-[#00529C] rounded-lg shadow-md transition-all duration-300 ease-in-out z-0 pointer-events-none"></div>
+
+                <button id="tab-report-btn" data-tab="report"
+                    class="tab-btn relative z-10 px-3.5 py-1.5 text-xs font-extrabold text-white transition-colors duration-200 inline-flex flex-row items-center gap-2 whitespace-nowrap shrink-0 rounded-lg">
+                    <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
+                    <span class="whitespace-nowrap">Báo cáo Tổng hợp Chi phí</span>
+                </button>
+                <button id="tab-dashboard-btn" data-tab="dashboard"
+                    class="tab-btn relative z-10 px-3.5 py-1.5 text-xs font-bold text-slate-600 hover:text-[#00529C] transition-colors duration-200 inline-flex flex-row items-center gap-2 whitespace-nowrap shrink-0 rounded-lg">
+                    <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M11 3.055A9.001 9.001 0 1020.945 13H11V3.055z" />
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M20.488 9H15V3.512A9.025 9.025 0 0120.488 9z" />
+                    </svg>
+                    <span class="whitespace-nowrap">Dashboard Biểu đồ</span>
+                </button>
+                <button id="tab-mapping-btn" data-tab="mapping"
+                    class="tab-btn relative z-10 px-3.5 py-1.5 text-xs font-bold text-slate-600 hover:text-[#00529C] transition-colors duration-200 inline-flex flex-row items-center gap-2 whitespace-nowrap shrink-0 rounded-lg">
+                    <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+                    </svg>
+                    <span class="whitespace-nowrap">Cấu hình Danh mục (B7 ↔ B10)</span>
+                </button>
+                <button id="tab-qtpn-btn" data-tab="qtpn"
+                    class="tab-btn relative z-10 px-3.5 py-1.5 text-xs font-bold text-slate-600 hover:text-[#00529C] transition-colors duration-200 inline-flex flex-row items-center gap-2 whitespace-nowrap shrink-0 rounded-lg">
+                    <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5m0 0h4m-4 0V11m0 0h4m-4 0H9" />
+                    </svg>
+                    <span class="whitespace-nowrap">Quản trị ↔ Pháp nhân</span>
+                </button>
+                <button id="tab-sync-btn" data-tab="sync"
+                    class="tab-btn relative z-10 px-3.5 py-1.5 text-xs font-bold text-slate-600 hover:text-[#00529C] transition-colors duration-200 inline-flex flex-row items-center gap-2 whitespace-nowrap shrink-0 rounded-lg">
+                    <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4" />
+                    </svg>
+                    <span class="whitespace-nowrap">Đồng bộ Database</span>
+                </button>
+            </nav>
+        </div>
+    </div>
+    </div>
+
+    <!-- Main Content Area (Light Gray Slate) -->
+    <main class="flex-1 p-6 overflow-hidden flex flex-col bg-slate-100">
+        <!-- Tab 1: Cost Report Section -->
+        <div id="report-section" class="flex-1 flex flex-col min-h-0">
+            <!-- Toolbar Hiển thị Cột, Bộ Lọc Khoản Mục & Mở rộng/Thu gọn (Canh lề 100% phẳng hàng với Bảng) -->
+            <div id="report-view-controls-bar" class="flex flex-wrap items-center justify-between gap-3 mb-3 bg-white p-3 rounded-xl border border-slate-200 text-xs shadow-sm">
+                <!-- Scope of categories: All vs Material items -->
+                <div id="cost-category-filter-group" class="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200">
+                    <span class="text-[10px] text-slate-600 font-bold uppercase px-1.5">Khoản mục:</span>
+                    <button id="btn-filter-material-all" class="px-2.5 py-1 text-xs font-bold rounded-lg bg-[#00529C] text-white shadow-sm transition-all">
+                        Tất cả (30)
+                    </button>
+                    <button id="btn-filter-material-only" class="px-2.5 py-1 text-xs font-medium rounded-lg bg-white text-amber-800 hover:bg-slate-50 border border-slate-200 transition-all flex items-center gap-1.5">
+                        <span>⭐ Chỉ xem Trọng yếu</span>
+                        <span id="material-count-badge" class="bg-amber-200 text-amber-900 border border-amber-300 px-1.5 py-0.2 rounded-full text-[10px] font-extrabold">10</span>
+                    </button>
+                </div>
+
+                <!-- View Controls -->
+                <div class="flex items-center gap-2 text-slate-600 text-xs flex-wrap">
+                    <span class="text-[10px] uppercase font-bold text-slate-500">Hiển thị cột:</span>
+                    <!-- Dropdown Bộ Chọn Năm So Sánh (2025, 2024, Cả 2 năm) -->
+                    <div class="relative inline-block text-left" id="year-picker-wrapper">
+                        <button id="btn-year-picker-toggle" class="px-3 py-1 rounded-lg bg-blue-50 text-[#00529C] hover:bg-blue-100 text-[11px] font-bold border border-blue-200 shadow-sm flex items-center gap-1.5 transition-all">
+                            <span id="badge-col-year-status" class="w-2 h-2 rounded-full bg-emerald-500 shrink-0"></span>
+                            <span>📅 So sánh: <strong id="selected-year-summary-label" class="text-blue-900 font-extrabold">Năm 2025</strong></span>
+                            <svg class="w-3 h-3 text-[#00529C] transition-transform duration-200" id="icon-year-picker-chevron" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+                            </svg>
+                        </button>
+
+                        <!-- Dropdown Menu -->
+                        <div id="year-picker-menu" class="hidden absolute left-0 mt-1.5 w-72 bg-white border border-slate-200 rounded-xl shadow-2xl z-50 p-3 text-xs text-slate-800">
+                            <div class="flex items-center justify-between pb-2 mb-2 border-b border-slate-200">
+                                <span class="font-bold text-[#00529C] uppercase text-[10px] tracking-wider">Cột So Sánh Lịch Sử:</span>
+                                <span class="text-[10px] text-slate-500 font-medium">(Tổng cả năm)</span>
+                            </div>
+
+                            <div class="space-y-1.5" id="year-picker-options">
+                                <label class="flex items-center justify-between p-2 rounded-lg border border-blue-200 bg-blue-50/60 cursor-pointer transition-all option-year-item" data-mode="2025">
+                                    <div class="flex items-center gap-2">
+                                        <input type="radio" name="year-compare-mode" value="2025" checked class="w-3.5 h-3.5 text-[#00529C] focus:ring-blue-500">
+                                        <div>
+                                            <div class="font-bold text-slate-800 text-xs">Năm 2025</div>
+                                            <div class="text-[10px] text-slate-500">Năm liền kề trước (Mặc định)</div>
+                                        </div>
+                                    </div>
+                                    <span class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-blue-100 text-blue-800">1 cột</span>
+                                </label>
+
+                                <label class="flex items-center justify-between p-2 rounded-lg border border-slate-200 hover:bg-slate-50 cursor-pointer transition-all option-year-item" data-mode="2024">
+                                    <div class="flex items-center gap-2">
+                                        <input type="radio" name="year-compare-mode" value="2024" class="w-3.5 h-3.5 text-[#00529C] focus:ring-blue-500">
+                                        <div>
+                                            <div class="font-bold text-slate-800 text-xs">Năm 2024</div>
+                                            <div class="text-[10px] text-slate-500">2 năm trước đó</div>
+                                        </div>
+                                    </div>
+                                    <span class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-blue-100 text-blue-800">1 cột</span>
+                                </label>
+
+                                <label class="flex items-center justify-between p-2 rounded-lg border border-slate-200 hover:bg-slate-50 cursor-pointer transition-all option-year-item" data-mode="BOTH">
+                                    <div class="flex items-center gap-2">
+                                        <input type="radio" name="year-compare-mode" value="BOTH" class="w-3.5 h-3.5 text-[#00529C] focus:ring-blue-500">
+                                        <div>
+                                            <div class="font-bold text-slate-800 text-xs">Cả 2 năm (2024 & 2025)</div>
+                                            <div class="text-[10px] text-slate-500">Hiển thị song song 2 cột so sánh</div>
+                                        </div>
+                                    </div>
+                                    <span class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800">2 cột</span>
+                                </label>
+                            </div>
+
+                            <div class="pt-2.5 mt-2.5 border-t border-slate-200 flex items-center justify-between text-[11px]">
+                                <label class="flex items-center gap-1.5 cursor-pointer select-none">
+                                    <input type="checkbox" id="chk-show-compare-col" checked class="w-3.5 h-3.5 text-[#00529C] rounded focus:ring-blue-500">
+                                    <span class="font-bold text-slate-700">Hiển thị trên bảng</span>
+                                </label>
+                                <button id="btn-apply-year-picker" class="px-2.5 py-1 bg-[#00529C] hover:bg-blue-700 text-white rounded font-bold shadow-sm">
+                                    Đóng
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Multi-select Month Selector Dropdown -->
+                    <div class="relative inline-block text-left" id="month-picker-wrapper">
+                        <button id="btn-month-picker-toggle" class="px-3 py-1 rounded-lg bg-blue-50 text-[#00529C] hover:bg-blue-100 text-[11px] font-bold border border-blue-200 shadow-sm flex items-center gap-1.5 transition-all">
+                            <span>📅 Tháng: <strong id="selected-months-summary-label" class="text-blue-900 font-extrabold">T1 - T7</strong></span>
+                            <svg class="w-3 h-3 text-[#00529C]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+                            </svg>
+                        </button>
+
+                        <!-- Dropdown Menu -->
+                        <div id="month-picker-menu" class="hidden absolute left-0 mt-1.5 w-72 bg-white border border-slate-200 rounded-xl shadow-2xl z-50 p-3 text-xs text-slate-800">
+                            <div class="flex items-center justify-between pb-2 mb-2 border-b border-slate-200">
+                                <span class="font-bold text-[#00529C] uppercase text-[10px]">Tùy chọn Tháng xem:</span>
+                                <div class="flex items-center gap-1 text-[10px]">
+                                    <button id="btn-select-all-months" class="px-1.5 py-0.5 rounded bg-blue-100 text-[#00529C] font-bold hover:bg-blue-200">Tất cả T1-T12</button>
+                                    <button id="btn-select-actual-months" class="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-900 font-bold hover:bg-emerald-200">T1-T7</button>
+                                    <button id="btn-deselect-all-months" class="px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 font-bold hover:bg-slate-200">Bỏ chọn</button>
+                                </div>
+                            </div>
+
+                            <div class="grid grid-cols-3 gap-1.5" id="month-checkboxes-container">
+                                <!-- Populated dynamically via JS -->
+                            </div>
+
+                            <div class="pt-2 mt-2 border-t border-slate-200 flex items-center justify-between text-[11px]">
+                                <span class="text-slate-500 font-medium">Đã chọn: <strong id="month-selected-count-badge" class="text-[#00529C] font-bold">7 tháng</strong></span>
+                                <button id="btn-apply-month-picker" class="px-2.5 py-1 bg-[#00529C] hover:bg-blue-700 text-white rounded font-bold shadow-sm">
+                                    Đóng
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <span class="text-slate-300">|</span>
+                    <button id="btn-expand-all" class="px-2.5 py-1 rounded-lg bg-blue-50 text-[#00529C] hover:bg-blue-100 text-[11px] border border-blue-200 font-bold transition-all">
+                        + Mở rộng tất cả
+                    </button>
+                    <button id="btn-collapse-all" class="px-2.5 py-1 rounded-lg bg-blue-50 text-[#00529C] hover:bg-blue-100 text-[11px] border border-blue-200 font-bold transition-all">
+                        − Thu gọn tất cả
+                    </button>
+                </div>
+            </div>
+
+            <div
+                class="bg-white border border-slate-200 rounded-xl shadow-lg flex-1 flex flex-col min-h-0 overflow-hidden">
+                <div class="table-container flex-1">
+                    <table class="w-full border-collapse text-left text-xs whitespace-nowrap">
+                        <thead id="report-table-head"
+                            class="text-xs uppercase bg-[#00529C] text-white border-b border-blue-900 select-none">
+                            <tr>
+                                <th rowspan="2"
+                                    class="p-2.5 text-center font-bold border-r border-blue-800 w-10 sticky-col-1 bg-[#00529C]">
+                                    TT</th>
+                                <th rowspan="2"
+                                    class="p-2.5 font-bold border-r border-blue-800 w-28 sticky-col-2 bg-[#00529C]">KMP
+                                    B7</th>
+                                <th rowspan="2"
+                                    class="p-2.5 font-bold border-r border-blue-800 w-24 sticky-col-3 bg-[#00529C]">KMP
+                                    B10</th>
+                                <th rowspan="2"
+                                    class="p-2.5 font-bold border-r border-blue-800 min-w-[220px] sticky-col-4 bg-[#00529C]">
+                                    Tên Chi phí</th>
+                                <th rowspan="2"
+                                    class="p-2.5 text-right font-bold border-r border-blue-800 w-28 text-blue-100">
+                                    TỔNG CHI PHÍ NĂM 2025<br /><span class="text-[10px] text-blue-200 font-normal">(Cả năm - ĐVT: Tr
+                                        đồng)</span>
+                                </th>
+                                <th colspan="8"
+                                    class="p-2 text-center font-bold border-r border-blue-800 bg-[#004080] text-[#FFFFD4]">
+                                    ĐÃ THỰC HIỆN NĂM 2026 (ĐVT: Tr đồng)
+                                </th>
+                                <th colspan="5"
+                                    class="p-2 text-center font-bold border-r border-blue-800 bg-[#0284C7] text-white">
+                                    KẾ HOẠCH / AI DỰ KIẾN 2026 (ĐVT: Tr đồng)
+                                </th>
+                                <th rowspan="2" class="p-2.5 text-right font-black bg-[#059669] text-[#FFFFD4] w-32">
+                                    CẢ NĂM 2026<br /><span class="text-[10px] font-normal text-emerald-100">(Thực hiện +
+                                        Dự kiến)</span>
+                                </th>
+                            </tr>
+                            <tr class="bg-[#003870] text-[11px] text-white">
+                                <!-- Thực hiện T1..T7 + Luỹ kế -->
+                                <th class="p-2 text-right border-r border-blue-800 w-16">T1</th>
+                                <th class="p-2 text-right border-r border-blue-800 w-16">T2</th>
+                                <th class="p-2 text-right border-r border-blue-800 w-16">T3</th>
+                                <th class="p-2 text-right border-r border-blue-800 w-16">T4</th>
+                                <th class="p-2 text-right border-r border-blue-800 w-16">T5</th>
+                                <th class="p-2 text-right border-r border-blue-800 w-16">T6</th>
+                                <th class="p-2 text-right border-r border-blue-800 w-16">T7</th>
+                                <th
+                                    class="p-2 text-right border-r border-blue-800 w-24 bg-amber-400 text-slate-950 font-black">
+                                    LUỸ KẾ</th>
+                                <!-- Kế hoạch T8..T12 -->
+                                <th class="p-2 text-right border-r border-blue-800 w-16 text-cyan-200">T8</th>
+                                <th class="p-2 text-right border-r border-blue-800 w-16 text-cyan-200">T9</th>
+                                <th class="p-2 text-right border-r border-blue-800 w-16 text-cyan-200">T10</th>
+                                <th class="p-2 text-right border-r border-blue-800 w-16 text-cyan-200">T11</th>
+                                <th class="p-2 text-right border-r border-blue-800 w-16 text-cyan-200">T12</th>
+                            </tr>
+                        </thead>
+                        <tbody id="report-table-body"
+                            class="divide-y divide-slate-200 bg-white font-mono text-slate-800">
+                            <!-- Populated dynamically via app.js -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tab 2: Visual Chart Dashboard Section (Light Theme) -->
+        <div id="dashboard-section"
+            class="hidden flex-1 flex flex-col min-h-0 bg-slate-50 border border-slate-200 rounded-xl p-5 overflow-auto shadow-lg space-y-4">
+            <div class="flex items-center justify-between pb-3 border-b border-slate-200">
+                <div>
+                    <h2 class="text-base font-bold text-slate-900 flex items-center gap-2">
+                        📊 Dashboard Phân tích Chi phí Hành chính Trực quan
+                        <span
+                            class="text-xs bg-blue-100 text-[#00529C] px-2 py-0.5 rounded border border-blue-300 font-bold">Chart.js
+                            360°</span>
+                    </h2>
+                    <p class="text-xs text-slate-600 mt-1">
+                        Tự động đồng bộ số liệu tức thời theo các Slicers bộ lọc Miền, Khối, Đơn vị Quản trị và danh
+                        sách Tháng được chọn.
+                    </p>
+                </div>
+                <div
+                    class="text-xs font-bold text-slate-500 bg-white border border-slate-200 px-3 py-1.5 rounded-lg shadow-sm">
+                    Cập nhật: <span class="text-[#00529C]" id="dashboard-update-time">Theo bộ lọc hiện tại</span>
+                </div>
+            </div>
+
+            <!-- Grid 4 Charts -->
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <!-- Chart Card 1: Cơ cấu theo Khối -->
+                <div
+                    class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm hover:shadow-md transition-all flex flex-col justify-between">
+                    <div class="flex items-center justify-between pb-2 border-b border-slate-100 mb-3">
+                        <h3 class="text-xs font-bold text-[#00529C] uppercase tracking-wider flex items-center gap-1.5">
+                            <span>🍩 Cơ cấu Chi phí theo 4 Khối Quản trị</span>
+                        </h3>
+                        <span class="text-[10px] text-slate-400 font-mono">2026</span>
+                    </div>
+                    <div class="relative h-64 w-full flex items-center justify-center">
+                        <canvas id="chart-block-pie"></canvas>
+                    </div>
+                </div>
+
+                <!-- Chart Card 2: Xu hướng 12 Tháng -->
+                <div
+                    class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm hover:shadow-md transition-all flex flex-col justify-between">
+                    <div class="flex items-center justify-between pb-2 border-b border-slate-100 mb-3">
+                        <h3 class="text-xs font-bold text-[#00529C] uppercase tracking-wider flex items-center gap-1.5">
+                            <span>📈 Diễn biến Chi phí 12 Tháng 2026 (Thực tế vs AI Forecast)</span>
+                        </h3>
+                        <span
+                            class="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded font-bold">T1-T7
+                            Thực tế | T8-T12 AI</span>
+                    </div>
+                    <div class="relative h-64 w-full">
+                        <canvas id="chart-monthly-trend"></canvas>
+                    </div>
+                </div>
+
+                <!-- Chart Card 3: Top Khoản mục Trọng yếu -->
+                <div
+                    class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm hover:shadow-md transition-all flex flex-col justify-between">
+                    <div class="flex items-center justify-between pb-2 border-b border-slate-100 mb-3">
+                        <h3 class="text-xs font-bold text-[#00529C] uppercase tracking-wider flex items-center gap-1.5">
+                            <span>⭐ Top Khoản mục Chi phí Trọng yếu nhất 2026</span>
+                        </h3>
+                        <span
+                            class="text-[10px] text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded font-bold">ĐVT:
+                            Tr.đ</span>
+                    </div>
+                    <div class="relative h-64 w-full">
+                        <canvas id="chart-top-material"></canvas>
+                    </div>
+                </div>
+
+                <!-- Chart Card 4: So sánh YoY 2025 vs 2026 -->
+                <div
+                    class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm hover:shadow-md transition-all flex flex-col justify-between">
+                    <div class="flex items-center justify-between pb-2 border-b border-slate-100 mb-3">
+                        <h3 class="text-xs font-bold text-[#00529C] uppercase tracking-wider flex items-center gap-1.5">
+                            <span>📊 So sánh Chi phí 2025 vs Dự kiến 2026 (Theo Đơn vị Quản trị)</span>
+                        </h3>
+                        <span class="text-[10px] text-slate-500 font-bold">Theo nguyên tắc quản trị</span>
+                    </div>
+                    <div class="relative h-64 w-full">
+                        <canvas id="chart-yoy-comparison"></canvas>
+                    </div>
+                </div>
+
+                <!-- Chart Card 5: Phân bổ Chi phí theo Khối / Bộ phận -->
+                <div
+                    class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm hover:shadow-md transition-all flex flex-col justify-between">
+                    <div class="flex items-center justify-between pb-2 border-b border-slate-100 mb-3">
+                        <h3 class="text-xs font-bold text-[#00529C] uppercase tracking-wider flex items-center gap-1.5">
+                            <span>🏢 Cơ cấu Chi phí theo Khối Phòng Ban (VPĐH / MB / MN / Chu Lai)</span>
+                        </h3>
+                        <span
+                            class="text-[10px] text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded font-bold">ĐVT:
+                            Tr.đ</span>
+                    </div>
+                    <div class="relative h-64 w-full flex items-center justify-center">
+                        <canvas id="chart-dept-blocks"></canvas>
+                    </div>
+                </div>
+
+                <!-- Chart Card 6: Top 10 Bộ phận có Chi phí lớn nhất -->
+                <div
+                    class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm hover:shadow-md transition-all flex flex-col justify-between">
+                    <div class="flex items-center justify-between pb-2 border-b border-slate-100 mb-3">
+                        <h3 class="text-xs font-bold text-[#00529C] uppercase tracking-wider flex items-center gap-1.5">
+                            <span>🏆 Top 10 Bộ phận có Chi phí Hành chính lớn nhất</span>
+                        </h3>
+                        <span
+                            class="text-[10px] text-blue-700 bg-blue-50 border border-blue-200 px-1.5 py-0.5 rounded font-bold">Lũy
+                            kế 2025-2026</span>
+                    </div>
+                    <div class="relative h-64 w-full">
+                        <canvas id="chart-top-departments"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tab 3: Category Mapping Section (Light Theme) -->
+        <div id="mapping-section"
+            class="hidden flex-1 flex flex-col min-h-0 bg-white border border-slate-200 rounded-xl p-5 overflow-auto shadow-lg">
+            <div class="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-slate-200 mb-4">
+                <div>
+                    <h2 class="text-base font-bold text-slate-900 flex items-center gap-2">
+                        Cấu hình Danh mục Ánh xạ Chi phí Hành chính (B7 ↔ B10)
+                        <span
+                            class="text-xs bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded border border-emerald-300 font-bold">Hỗ
+                            trợ N:1 & Gom Nhóm</span>
+                    </h2>
+                    <p class="text-xs text-slate-600 mt-1">
+                        Quản lý phân nhóm chi phí, mã Bravo 7, Bravo 10 và đánh dấu <span
+                            class="text-amber-700 font-bold">⭐</span>. Tab Báo cáo tổng hợp sẽ tự động đồng bộ theo cấu
+                        hình này.
+                    </p>
+                </div>
+                <div class="flex items-center gap-2">
+                    <button id="btn-add-group"
+                        class="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 text-xs font-bold rounded-lg shadow-sm transition-all flex items-center gap-1.5">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+                        </svg>
+                        Thêm Nhóm Chi Phí
+                    </button>
+                    <button id="btn-add-category"
+                        class="px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 text-xs font-bold rounded-lg shadow-sm transition-all flex items-center gap-1.5">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M12 9v3m0 0v3m0-3h3m-3 0H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        Thêm Khoản Mục Chi Phí
+                    </button>
+                    <button id="btn-save-mapping"
+                        class="px-4 py-1.5 bg-[#00529C] hover:bg-blue-700 text-white text-xs font-bold rounded-lg shadow-md transition-all flex items-center gap-1.5">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                        </svg>
+                        Lưu & Tính toán lại
+                    </button>
+                </div>
+            </div>
+
+            <!-- Google Sheet Live Sync Control Bar (THACO AUTO Two-Way Sync) -->
+            <div
+                class="bg-gradient-to-r from-emerald-50 via-teal-50 to-blue-50 border border-emerald-300/80 rounded-xl p-3.5 mb-3 shadow-sm flex flex-wrap items-center justify-between gap-3">
+                <div class="flex items-center gap-3">
+                    <div
+                        class="w-9 h-9 rounded-lg bg-emerald-600 text-white flex items-center justify-center font-bold shadow flex-shrink-0">
+                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
+                            <path
+                                d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-7 14H6v-2h6v2zm4-4H6v-2h10v2zm0-4H6V7h10v2z" />
+                        </svg>
+                    </div>
+                    <div>
+                        <div class="flex items-center gap-2">
+                            <span class="text-xs font-black text-slate-900">Google Sheet:</span>
+                            <a href="https://docs.google.com/spreadsheets/d/1UwV3TbvAfeLZslEazzcFWi5cXsJo98AQmxX5dXH1Pqo/edit?gid=980279299#gid=980279299"
+                                target="_blank"
+                                class="text-xs font-bold text-[#00529C] hover:underline flex items-center gap-1"
+                                title="Mở trực tiếp file Google Sheet Quan_Ly_Chi_Phi">
+                                <span>Quan_Ly_Chi_Phi (DM_CPHC)</span>
+                                <svg class="w-3.5 h-3.5 text-blue-700" fill="none" stroke="currentColor"
+                                    viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                        d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                                </svg>
+                            </a>
+                            <span id="gsheet-sync-status-badge"
+                                class="text-[10px] font-extrabold px-2.5 py-0.5 rounded-full bg-slate-200 text-slate-700 border border-slate-300">
+                                ⚪ Chưa cấu hình Web App URL
+                            </span>
+                        </div>
+                        <p class="text-[11px] text-slate-600 mt-0.5" id="gsheet-sync-status-msg">
+                            Đồng bộ 2 chiều tức thì: Thêm, sửa, xóa trên Web App hoặc Google Sheet sẽ tự động đồng bộ
+                            nhau.
+                        </p>
+                    </div>
+                </div>
+
+                <div class="flex items-center gap-2">
+                    <button id="btn-sync-from-gsheet"
+                        class="px-3 py-1.5 bg-white hover:bg-emerald-50 text-emerald-800 border border-emerald-300 text-xs font-bold rounded-lg shadow-sm transition-all flex items-center gap-1.5"
+                        title="Kéo bản cập nhật mới nhất từ Google Sheet về Web App">
+                        <svg class="w-3.5 h-3.5 text-emerald-600 animate-spin-hover" fill="none" stroke="currentColor"
+                            viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                        </svg>
+                        <span>🔄 Tải từ Google Sheet</span>
+                    </button>
+                    <button id="btn-push-to-gsheet"
+                        class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg shadow-sm transition-all flex items-center gap-1.5"
+                        title="Đẩy toàn bộ cấu hình danh mục hiện tại lên Google Sheet">
+                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                        </svg>
+                        <span>⚡ Đẩy lên Google Sheet</span>
+                    </button>
+                    <button id="btn-open-gsheet-config-modal"
+                        class="px-3 py-1.5 bg-white hover:bg-slate-100 text-slate-700 text-xs font-semibold rounded-lg border border-slate-300 shadow-sm transition-all flex items-center gap-1"
+                        title="Cài đặt đường link kết nối Google Apps Script">
+                        ⚙️ Cài đặt kết nối
+                    </button>
+                </div>
+            </div>
+
+            <!-- Drag & Drop Help Banner -->
+            <div
+                class="bg-blue-50/80 border border-blue-200/80 rounded-lg p-2.5 mb-4 text-xs text-blue-950 flex items-center justify-between gap-2 shadow-sm">
+                <div class="flex items-center gap-2">
+                    <span class="bg-[#00529C] text-white p-1 rounded font-mono font-bold text-[10px]">💡 MẸO</span>
+                    <span><strong>Kéo & Thả di chuyển nhóm:</strong> Giữ chuột vào biểu tượng <code
+                            class="bg-blue-100 border border-blue-300 px-1 py-0.5 rounded font-mono font-bold text-blue-900">⠿ Drag</code>
+                        ở đầu dòng để kéo khoản mục thả vào Nhóm khác, hoặc dùng menu <i>Select đổi nhóm nhanh</i> ở cột
+                        Thao tác.</span>
+                </div>
+                <span class="text-[11px] text-blue-700 font-semibold italic">Tự động sắp xếp TT & cập nhật tức
+                    thì</span>
+            </div>
+
+            <div class="overflow-auto max-h-[620px] border border-slate-200 rounded-lg shadow-sm">
+                <table class="w-full text-left text-xs border-collapse">
+                    <thead
+                        class="bg-[#00529C] text-white sticky top-0 uppercase font-bold border-b border-blue-900 shadow-sm z-20">
+                        <tr>
+                            <th class="p-2.5 text-center w-20 border-r border-blue-800 text-white">Kéo / TT</th>
+                            <th class="p-2.5 w-48 border-r border-blue-800 text-cyan-200">Mã Bravo 7</th>
+                            <th class="p-2.5 w-40 border-r border-blue-800 text-emerald-200">Mã Bravo 10</th>
+                            <th class="p-2.5 border-r border-blue-800 text-white">Tên Chi phí / Diễn giải</th>
+                            <th class="p-2.5 text-center w-20 border-r border-blue-800 text-amber-200"
+                                title="Khoản mục Trọng yếu">⭐</th>
+                            <th class="p-2.5 text-center w-64 text-white">Chuyển Nhóm & Thao tác</th>
+                        </tr>
+                    </thead>
+                    <tbody id="mapping-table-body" class="divide-y divide-slate-200">
+                        <!-- Populated dynamically via app.js -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Tab: Quản trị ↔ Pháp nhân (DM_QTPN) -->
+        <div id="qtpn-section"
+            class="hidden flex-1 flex flex-col min-h-0 bg-white border border-slate-200 rounded-xl p-6 overflow-auto shadow-lg">
+
+            <!-- Header & Control Bar -->
+            <div class="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-slate-200 mb-4">
+                <div>
+                    <h2 class="text-base font-bold text-slate-900 flex items-center gap-2">
+                        <div
+                            class="w-7 h-7 rounded-lg bg-[#00529C] text-white flex items-center justify-center font-bold text-xs shadow-sm">
+                            🏛️
+                        </div>
+                        Danh Mục Quản Trị ↔ Pháp Nhân: <span class="text-emerald-700 font-mono">DM_QTPN</span>
+                    </h2>
+                    <p class="text-xs text-slate-600 mt-1">
+                        Cấu hình ma trận liên kết giữa Mã/Tên Đơn vị Quản trị và Mã/Tên Pháp nhân. Tự động đồng bộ với
+                        Google Sheet <code class="text-emerald-700 font-mono">DM_QTPN</code>.
+                    </p>
+                </div>
+
+                <div class="flex flex-wrap items-center gap-2">
+                    <button id="btn-sync-qtpn-from-gsheet"
+                        class="px-3 py-1.5 bg-white hover:bg-emerald-50 text-emerald-800 border border-emerald-300 text-xs font-bold rounded-lg shadow-sm transition-all flex items-center gap-1.5"
+                        title="Tải bản cập nhật mới nhất từ Google Sheet DM_QTPN">
+                        <svg class="w-3.5 h-3.5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                        </svg>
+                        <span>🔄 Tải từ DM_QTPN</span>
+                    </button>
+                    <button id="btn-push-qtpn-to-gsheet"
+                        class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg shadow-sm transition-all flex items-center gap-1.5"
+                        title="Đẩy dữ liệu ma trận Quản trị ↔ Pháp nhân lên Google Sheet DM_QTPN">
+                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                        </svg>
+                        <span>⚡ Đẩy lên Sheet DM_QTPN</span>
+                    </button>
+                    <button id="btn-add-qtpn-group"
+                        class="px-3 py-1.5 bg-[#00529C] hover:bg-[#003870] text-white text-xs font-bold rounded-lg shadow-sm transition-all flex items-center gap-1.5"
+                        title="Tạo mới một Đơn vị Quản trị">
+                        <span>🏛️ ➕ Thêm Quản trị</span>
+                    </button>
+                    <button id="btn-add-qtpn-row"
+                        class="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold rounded-lg shadow-sm transition-all flex items-center gap-1.5"
+                        title="Thêm mới một Pháp nhân trực thuộc">
+                        <span>🏢 ➕ Thêm Pháp nhân</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Drag & Drop Help Banner -->
+            <div
+                class="bg-blue-50/80 border border-blue-200/80 rounded-lg p-2.5 mb-3 text-xs text-blue-950 flex items-center justify-between gap-2 shadow-sm">
+                <div class="flex items-center gap-2">
+                    <span class="bg-[#00529C] text-white p-1 rounded font-mono font-bold text-[10px]">💡 MẸO</span>
+                    <span><strong>Kéo & Thả di chuyển Quản trị:</strong> Giữ chuột vào biểu tượng <code
+                            class="bg-blue-100 border border-blue-300 px-1 py-0.5 rounded font-mono font-bold text-blue-900">⠿ Drag</code>
+                        ở đầu dòng Pháp nhân để kéo thả vào Dòng Mẹ Quản trị khác, hoặc dùng menu <i>Select đổi Quản trị
+                            nhanh</i> ở cột Đơn vị Quản trị.</span>
+                </div>
+                <span class="text-[11px] text-blue-700 font-semibold italic">Tự động đồng bộ với Google Sheet
+                    DM_QTPN</span>
+            </div>
+
+            <!-- Toolbar Search & Stats -->
+            <div
+                class="flex flex-wrap items-center justify-between gap-3 mb-3 bg-slate-50 p-3 rounded-xl border border-slate-200 text-xs">
+                <div class="flex items-center gap-2 flex-1 max-w-md">
+                    <span class="font-bold text-slate-700">🔍 Tìm kiếm:</span>
+                    <input type="text" id="input-search-qtpn" placeholder="Nhập mã/tên Quản trị hoặc Pháp nhân..."
+                        class="flex-1 bg-white border border-slate-300 rounded-lg px-3 py-1.5 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#00529C]">
+                </div>
+                <div class="text-slate-600 font-medium">
+                    Tổng số dòng ánh xạ: <strong id="qtpn-count-badge" class="text-[#00529C] font-bold">0</strong> dòng
+                </div>
+            </div>
+
+            <!-- Data Table -->
+            <div class="overflow-auto max-h-[600px] border border-slate-200 rounded-lg shadow-sm">
+                <table class="w-full text-left text-xs border-collapse">
+                    <thead
+                        class="bg-[#00529C] text-white sticky top-0 uppercase font-bold border-b border-blue-900 shadow-sm z-20">
+                        <tr>
+                            <th class="p-2.5 text-center w-16 border-r border-blue-800 text-white">STT</th>
+                            <th class="p-2.5 w-32 border-r border-blue-800 text-emerald-200">Khối Đơn Vị</th>
+                            <th class="p-2.5 w-28 border-r border-blue-800 text-cyan-200">Mã Quản Trị</th>
+                            <th class="p-2.5 w-48 border-r border-blue-800 text-white">Đơn Vị Quản Trị</th>
+                            <th class="p-2.5 w-32 border-r border-blue-800 text-amber-200">Mã Pháp Nhân</th>
+                            <th class="p-2.5 border-r border-blue-800 text-white">Tên Pháp Nhân / Showroom</th>
+                            <th class="p-2.5 text-center w-36 text-white">Thao Tác</th>
+                        </tr>
+                    </thead>
+                    <tbody id="qtpn-table-body" class="divide-y divide-slate-200">
+                        <!-- Populated dynamically via app.js -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Tab 3: Google Sheets Sync Section (Light Theme) -->
+        <div id="sync-section"
+            class="hidden flex-1 flex flex-col min-h-0 bg-white border border-slate-200 rounded-xl p-6 overflow-auto shadow-lg">
+            <div class="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-slate-200 mb-5">
+                <div>
+                    <h2 class="text-base font-bold text-slate-900 flex items-center gap-2">
+                        <div
+                            class="w-7 h-7 rounded-lg bg-emerald-600 text-white flex items-center justify-center font-bold text-xs shadow-sm">
+                            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                                <path
+                                    d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-7 14H6v-2h6v2zm4-4H6v-2h10v2zm0-4H6V7h10v2z" />
+                            </svg>
+                        </div>
+                        Đồng Bộ Database: <span class="text-[#00529C] font-mono">Quan_Ly_Chi_Phi</span>
+                        (Sheet: <span class="text-emerald-700 font-mono">DM_CPHC</span>)
+                    </h2>
+                    <p class="text-xs text-slate-600 mt-1">
+                        Kết nối tự động giữa Web App và Database Google Sheet. Mọi thao tác thêm, sửa, xóa nhóm và khoản mục sẽ
+                        luôn được cập nhật đồng bộ 2 chiều.
+                    </p>
+                </div>
+                <div class="flex items-center gap-2">
+                    <a href="https://docs.google.com/spreadsheets/d/1UwV3TbvAfeLZslEazzcFWi5cXsJo98AQmxX5dXH1Pqo/edit?gid=980279299#gid=980279299"
+                        target="_blank"
+                        class="px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 text-xs font-bold rounded-lg shadow-sm transition-all flex items-center gap-1.5">
+                        <svg class="w-4 h-4 text-emerald-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                        </svg>
+                        Mở Google Sheet DM_CPHC
+                    </a>
+                </div>
+            </div>
+
+            <!-- Live Status & Quick Action Card (30% - 30% - 40%) -->
+            <div class="grid grid-cols-1 md:grid-cols-12 gap-4 mb-6">
+                <!-- Status Box (~30%) -->
+                <div
+                    class="md:col-span-4 bg-gradient-to-br from-emerald-50 to-teal-50 border border-emerald-200 rounded-xl p-4 shadow-sm flex flex-col justify-between">
+                    <div class="flex items-center justify-between gap-2">
+                        <span class="text-[11px] font-bold uppercase text-emerald-800 tracking-wider whitespace-nowrap">Trạng thái kết nối:</span>
+                        <span id="tab-sync-status-badge"
+                            class="px-2.5 py-1 rounded-full text-xs font-black bg-slate-200 text-slate-700 border border-slate-300 whitespace-nowrap">
+                            ⚪ Chưa kết nối Apps Script URL
+                        </span>
+                    </div>
+                    <div class="text-[11px] text-slate-600 mt-2" id="tab-sync-last-time">
+                        Chưa có lượt đồng bộ nào trong phiên này.
+                    </div>
+                </div>
+
+                <!-- Sync Actions Box (~30%) -->
+                <div class="md:col-span-4 bg-slate-50 border border-slate-200 rounded-xl p-4 shadow-sm flex items-center justify-between gap-3">
+                    <span class="text-[11px] font-bold uppercase text-slate-700 tracking-wider whitespace-nowrap">Thao tác Đồng bộ:</span>
+                    <div class="flex items-center gap-2 flex-1 justify-end">
+                        <button id="btn-sync-pull-tab"
+                            class="px-3 py-1.5 bg-white hover:bg-emerald-50 text-emerald-800 border border-emerald-300 text-xs font-bold rounded-lg shadow-sm transition-all flex items-center justify-center gap-1.5 whitespace-nowrap">
+                            <svg class="w-4 h-4 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                            </svg>
+                            <span>Tải từ Sheet</span>
+                        </button>
+                        <button id="btn-sync-push-tab"
+                            class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg shadow-sm transition-all flex items-center justify-center gap-1.5 whitespace-nowrap">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                            </svg>
+                            <span>Đẩy lên Sheet</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Web App URL Input Box (~40%) -->
+                <div class="md:col-span-4 bg-slate-50 border border-slate-200 rounded-xl p-4 shadow-sm flex items-center justify-between gap-3">
+                    <span class="text-[11px] font-bold uppercase text-slate-700 tracking-wider whitespace-nowrap">Web App URL:</span>
+                    <div class="flex items-center gap-1.5 flex-1">
+                        <input type="url" id="tab-input-gsheet-url"
+                            placeholder="https://script.google.com/macros/s/.../exec"
+                            class="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-mono text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500">
+                        <button id="btn-tab-save-url"
+                            class="px-3 py-1.5 bg-[#00529C] hover:bg-blue-700 text-white font-bold text-xs rounded-lg shadow-sm transition-all whitespace-nowrap">
+                            Lưu
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Cost Sheets Synchronization Box (CP_AUTO, CP_PP, CP_CTTT) -->
+            <div
+                class="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-xl p-4 shadow-sm mb-6 flex flex-wrap items-center justify-between gap-4">
+                <div>
+                    <div class="flex items-center gap-2">
+                        <span class="px-2 py-0.5 rounded text-[10px] font-black bg-[#00529C] text-white uppercase">Dữ
+                            liệu Chi Phí Thực Tế</span>
+                        <span class="text-xs font-bold text-slate-800">Các Sheet: <code
+                                class="text-[#00529C] font-mono">CP_AUTO</code>, <code
+                                class="text-emerald-700 font-mono">CP_PP</code>, <code
+                                class="text-purple-700 font-mono">CP_CTTT</code></span>
+                    </div>
+                    <p class="text-[11px] text-slate-600 mt-1">
+                        Dữ liệu chi phí đã làm sạch gồm 26 cột chuẩn hoá (Mã ĐVCS, Khoản mục B7, B10, Bộ phận, Khối, 12
+                        Tháng và Tổng cộng).
+                    </p>
+                </div>
+                <div class="flex items-center gap-2">
+                    <button id="btn-sync-c1101-to-gsheet"
+                        class="px-3.5 py-2 bg-[#00529C] hover:bg-[#003870] text-white text-xs font-bold rounded-lg shadow transition-all flex items-center gap-2">
+                        <svg class="w-4 h-4 text-amber-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M13 10V3L4 14h7v7l9-11h-7z" />
+                        </svg>
+                        <span>⚡ Đẩy Dữ Liệu THACO AUTO (2025 & 2026) lên CP_AUTO</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Code & Instruction Section -->
+            <div
+                class="bg-slate-900 p-4 rounded-xl border border-slate-800 text-xs text-slate-200 overflow-hidden mb-4 shadow-inner">
+                <div class="flex items-center justify-between pb-2 mb-3 border-b border-slate-800">
+                    <span class="font-bold text-emerald-400 font-mono text-xs flex items-center gap-1.5">
+                        <span>📋 Mã nguồn Google Apps Script (Code.gs) - File: google_apps_script.js</span>
+                    </span>
+                    <button id="btn-tab-copy-code"
+                        class="px-3 py-1 bg-slate-800 hover:bg-slate-700 text-white border border-slate-700 rounded text-xs font-bold transition-all flex items-center gap-1">
+                        <span>Sao chép toàn bộ mã</span>
+                    </button>
+                </div>
+                <pre class="font-mono text-[11px] overflow-x-auto max-h-56 text-slate-300 leading-relaxed"><code>/**
+ * GOOGLE APPS SCRIPT: ĐỒNG BỘ 2 CHIỀU DANH MỤC CHI PHÍ HÀNH CHÍNH (DM_CPHC)
+ * Sheet: Quan_Ly_Chi_Phi | Tab: DM_CPHC
+ */
+var SHEET_NAME = 'DM_CPHC';
+
+function doGet(e) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SHEET_NAME);
+  if (!sheet) return jsonResponse({ status: 'error', message: 'Không tìm thấy sheet DM_CPHC' });
+  var data = sheet.getDataRange().getValues();
+  // Tự động đọc dữ liệu DM_CPHC thành JSON trả về Web App...
+  // (Xem toàn bộ mã nguồn đầy đủ trong file google_apps_script.js)
+}
+
+function doPost(e) {
+  var payload = JSON.parse(e.postData.contents);
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SHEET_NAME) || ss.insertSheet(SHEET_NAME);
+  // Tự động ghi nhận và kẻ bảng chuẩn THACO AUTO...
+}</code></pre>
+            </div>
+
+            <div class="bg-blue-50 border border-blue-200 p-4 rounded-xl text-xs text-blue-900 leading-relaxed">
+                <h3 class="font-bold text-[#00529C] mb-1.5 flex items-center gap-1.5">
+                    <span>💡 Hướng dẫn triển khai nhanh (1 phút):</span>
+                </h3>
+                <ol class="list-decimal pl-5 space-y-1 text-[11px] text-blue-950">
+                    <li>Mở file Google Sheet <a
+                            href="https://docs.google.com/spreadsheets/d/1UwV3TbvAfeLZslEazzcFWi5cXsJo98AQmxX5dXH1Pqo/edit"
+                            target="_blank" class="font-bold underline text-[#00529C]">Quan_Ly_Chi_Phi</a>.</li>
+                    <li>Vào <strong>Tiện ích mở rộng (Extensions)</strong> &gt; chọn <strong>Apps Script</strong>.</li>
+                    <li>Dán toàn bộ mã trong file <code
+                            class="bg-blue-100 px-1 rounded font-mono font-bold text-blue-900">google_apps_script.js</code>
+                        (đã tạo sẵn trong thư mục dự án) vào và nhấn <strong>Ctrl + S</strong>.</li>
+                    <li>Bấm nút <strong>Triển khai (Deploy)</strong> &gt; chọn <strong>Triển khai mới (New
+                            deployment)</strong> &gt; chọn loại <strong>Ứng dụng web (Web app)</strong>.</li>
+                    <li>Chọn Thực thi dưới dạng <strong>Tôi (Me)</strong> và Ai có quyền truy cập <strong>Bất kỳ ai
+                            (Anyone)</strong>.</li>
+                    <li>Bấm <strong>Triển khai</strong> &gt; Copy <strong>URL ứng dụng web</strong> dán vào ô bên trên
+                        và bấm <strong>Lưu</strong>!</li>
+                </ol>
+            </div>
+        </div>
+    </main>
+
+    <!-- Export Options Modal (Báo cáo PowerPoint Format & Excel Matrix) -->
+    <div id="export-modal"
+        class="hidden fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4">
+        <div class="bg-white border border-slate-200 rounded-2xl max-w-lg w-full p-6 shadow-2xl">
+            <div class="flex items-center justify-between pb-3 border-b border-slate-200">
+                <h3 class="text-base font-bold text-slate-900 flex items-center gap-2">
+                    <svg class="w-5 h-5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
+                    Tùy chọn Xuất Báo cáo Excel
+                </h3>
+                <button onclick="document.getElementById('export-modal').classList.add('hidden')"
+                    class="text-slate-400 hover:text-slate-700 text-lg font-bold">✕</button>
+            </div>
+
+            <div class="my-5 space-y-3">
+                <!-- Option 1: Bộ Báo cáo Chuẩn PowerPoint -->
+                <button id="btn-export-pptx-format"
+                    class="w-full text-left p-4 rounded-xl border-2 border-emerald-500 bg-emerald-50/50 hover:bg-emerald-100/70 transition-all flex items-start gap-3.5 group shadow-sm">
+                    <div class="p-2.5 rounded-lg bg-emerald-600 text-white font-extrabold text-lg shadow">📊</div>
+                    <div>
+                        <div
+                            class="text-xs font-black text-emerald-950 group-hover:text-emerald-700 flex items-center gap-2">
+                            <span>BỘ BÁO CÁO CHUẨN POWERPOINT (EXCEL MULTI-SHEET)</span>
+                            <span
+                                class="bg-emerald-600 text-white text-[9px] px-1.5 py-0.2 rounded font-bold uppercase">Khuyên
+                                dùng</span>
+                        </div>
+                        <p class="text-[11px] text-emerald-800 mt-1 leading-relaxed">
+                            Xuất file Excel gồm <strong>5 Sheet</strong> định dạng chuẩn theo Slide PowerPoint (Slide 2
+                            Tổng quan Quý, Slide 3 Chi tiết Tháng & Khối, Slide 4 30 Khoản mục, Slide 8 & 9 Chi tiết 111
+                            Pháp nhân, Slide 5 & 6 Tỷ lệ % CPHC/Doanh thu). Thích hợp copy dán trực tiếp vào slide
+                            thuyết trình!
+                        </p>
+                    </div>
+                </button>
+
+                <!-- Option 2: Báo cáo Ma trận Chi tiết Hiện tại -->
+                <button id="btn-export-current-matrix"
+                    class="w-full text-left p-4 rounded-xl border border-slate-300 bg-slate-50 hover:bg-slate-100 transition-all flex items-start gap-3.5 group">
+                    <div class="p-2.5 rounded-lg bg-[#00529C] text-white font-bold text-lg shadow">📄</div>
+                    <div>
+                        <div class="text-xs font-bold text-slate-800 group-hover:text-[#00529C]">
+                            BÁO CÁO MA TRẬN CHI TIẾT HIỆN TẠI (1 SHEET)
+                        </div>
+                        <p class="text-[11px] text-slate-600 mt-1 leading-relaxed">
+                            Xuất 1 Sheet Excel chứa toàn bộ ma trận số liệu chi tiết theo đúng các bộ lọc Miền, Khối,
+                            Quản trị, Tài khoản đang chọn trên màn hình.
+                        </p>
+                    </div>
+                </button>
+            </div>
+
+            <div class="flex justify-end pt-3 border-t border-slate-200 text-xs">
+                <button onclick="document.getElementById('export-modal').classList.add('hidden')"
+                    class="px-4 py-1.5 rounded-lg bg-slate-100 text-slate-700 hover:bg-slate-200 font-bold">
+                    Đóng
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Upload Modal for Monthly Bravo Excel File (Sáng Đẹp, Chuẩn Kiểm Toán) -->
+    <div id="upload-modal"
+        class="hidden fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+        <div
+            class="bg-white border border-slate-200 rounded-2xl max-w-xl w-full p-6 shadow-2xl max-h-[90vh] overflow-y-auto">
+            <div class="flex items-center justify-between pb-3 border-b border-slate-200">
+                <h3 class="text-base font-bold text-slate-900 flex items-center gap-2">
+                    <div
+                        class="w-7 h-7 rounded-lg bg-[#00529C] text-white flex items-center justify-center font-bold text-xs shadow-sm">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                        </svg>
+                    </div>
+                    Nạp Dữ Liệu Chi Phí Hành Chính (Xuất từ Bravo)
+                </h3>
+                <button onclick="document.getElementById('upload-modal').classList.add('hidden')"
+                    class="text-slate-400 hover:text-slate-700 text-lg font-bold">✕</button>
+            </div>
+
+            <!-- Drag & Drop Zone -->
+            <div id="upload-drop-section" class="my-4">
+                <p class="text-xs text-slate-600 mb-3 leading-relaxed">
+                    Hỗ trợ kéo thả trực tiếp file báo cáo chi phí hành chính xuất từ phần mềm <strong>Bravo</strong> (Ví
+                    dụ: <em>CPHC - THACO AUTO 2025.xlsx</em>, <em>CPHC - THACO AUTO T1 Den T7 nam 2026.xlsx</em>,...).
+                    Hệ thống sẽ tự động làm sạch và kiểm toán từng đồng.
+                </p>
+                <label for="excel-file-input" id="excel-drop-zone"
+                    class="block border-2 border-dashed border-blue-300 hover:border-[#00529C] hover:bg-blue-50/50 rounded-xl p-8 text-center cursor-pointer transition-all bg-slate-50 select-none">
+                    <svg class="w-12 h-12 text-[#00529C] mx-auto mb-2.5 pointer-events-none" fill="none"
+                        stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+                            d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
+                    <div class="text-sm font-bold text-slate-800 pointer-events-none">Kéo thả file Excel Bravo vào đây
+                    </div>
+                    <div class="text-xs text-slate-500 mt-1 mb-3 pointer-events-none">hoặc nhấp chuột vào ô này để chọn
+                        file (.xlsx, .xls)</div>
+                    <span
+                        class="inline-flex items-center gap-1.5 px-4 py-2 bg-[#00529C] hover:bg-[#003870] text-white text-xs font-bold rounded-lg shadow-sm pointer-events-none">
+                        <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                        </svg>
+                        Bấm vào đây để Chọn File Excel
+                    </span>
+                    <input type="file" id="excel-file-input" accept=".xlsx,.xls" class="hidden">
+                </label>
+            </div>
+
+            <!-- Audit & Confirmation Preview Container (Hiển thị sau khi kéo file) -->
+            <div id="upload-preview-container" class="hidden space-y-4 my-4">
+                <div class="bg-emerald-50 border border-emerald-300 rounded-xl p-3.5 flex items-center justify-between">
+                    <div class="flex items-center gap-2">
+                        <span class="text-emerald-700 text-lg">✅</span>
+                        <div>
+                            <div class="font-black text-emerald-950 text-xs">Đã đọc & làm sạch dữ liệu thành công!</div>
+                            <div class="text-[11px] text-emerald-800 font-mono mt-0.5" id="preview-file-name">-</div>
+                        </div>
+                    </div>
+                    <span
+                        class="text-[10px] font-black uppercase px-2 py-0.5 rounded bg-emerald-600 text-white shadow-sm">Chuẩn
+                        Bravo</span>
+                </div>
+
+                <!-- Entity & Target Sheet Selection -->
+                <div
+                    class="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-slate-50 p-3 rounded-xl border border-slate-200 text-xs">
+                    <div>
+                        <label class="block font-bold text-slate-700 mb-1" for="preview-entity-input">
+                            Đơn vị / Pháp nhân nhận diện (<span class="text-rose-600 font-extrabold">*</span> Dạng <code
+                                class="bg-slate-200 px-1 rounded text-[#00529C]">MÃ - TÊN</code>):
+                        </label>
+                        <input type="text" id="preview-entity-input" list="entity-datalist-suggestions"
+                            placeholder="Ví dụ: C1101 - THACO AUTO"
+                            class="w-full font-bold text-[#00529C] p-2 bg-white rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#00529C]">
+                        <datalist id="entity-datalist-suggestions">
+                            <option value="C1101 - THACO AUTO"></option>
+                            <option value="C2305 - PP THACO AUTO"></option>
+                        </datalist>
+                    </div>
+                    <div>
+                        <label class="block font-bold text-slate-700 mb-1">Năm & Kỳ thực hiện:</label>
+                        <div id="preview-period-info"
+                            class="font-bold text-slate-800 p-2 bg-white rounded border border-slate-200">
+                            Năm 2026 (T1 - T7)
+                        </div>
+                    </div>
+                    <div class="sm:col-span-2">
+                        <label class="block font-bold text-slate-700 mb-1">Đích ghi nhận trên Google Sheet:</label>
+                        <select id="select-target-sheet"
+                            class="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 font-bold text-slate-800 focus:ring-2 focus:ring-[#00529C]">
+                            <option value="CP_AUTO" selected>Sheet CP_AUTO - THACO AUTO (Văn phòng điều hành / Tổng Cty)
+                            </option>
+                            <option value="CP_PP">Sheet CP_PP - Phân Phối THACO AUTO (Cty Phân phối)</option>
+                            <option value="CP_CTTT">Sheet CP_CTTT - Công ty Tỉnh Thành / Chi nhánh</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Audit Reconciliation Box (Đối chiếu từng đồng) -->
+                <div class="border border-slate-200 rounded-xl overflow-hidden bg-white shadow-sm text-xs">
+                    <div
+                        class="bg-slate-100 px-3.5 py-2 font-bold text-slate-800 border-b border-slate-200 flex items-center justify-between">
+                        <span>🔍 Bảng Đối Chiếu Kiểm Toán Dữ Liệu</span>
+                        <span id="preview-audit-badge"
+                            class="px-2 py-0.5 rounded text-[10px] font-black bg-emerald-100 text-emerald-800 border border-emerald-300">
+                            Khớp 100% từng đồng
+                        </span>
+                    </div>
+                    <div class="p-3.5 space-y-2">
+                        <div class="flex justify-between items-center text-slate-600">
+                            <span>Số dòng dữ liệu chi phí đã làm sạch (sau khi bỏ dòng cộng):</span>
+                            <span class="font-bold text-slate-900" id="preview-row-count">-</span>
+                        </div>
+                        <div class="flex justify-between items-center text-slate-600">
+                            <span>Tổng cộng tiền chi phí hành chính (Cộng từng dòng):</span>
+                            <span class="font-bold text-[#00529C] font-mono text-sm" id="preview-calc-total">-</span>
+                        </div>
+                        <div class="flex justify-between items-center text-slate-600">
+                            <span>Dòng đối chiếu Bravo (CỘNG CHI PHÍ HÀNH CHÁNH):</span>
+                            <span class="font-bold text-slate-700 font-mono" id="preview-bravo-total">-</span>
+                        </div>
+                        <div class="flex justify-between items-center pt-2 border-t border-slate-100 font-bold">
+                            <span class="text-slate-800">Chênh lệch kiểm toán:</span>
+                            <span class="text-emerald-700 font-mono" id="preview-diff-total">0 đ (Tuyệt đối chuẩn
+                                xác)</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Google Sheet Sync Option -->
+                <div class="bg-blue-50 border border-blue-200 rounded-xl p-3 flex items-start gap-2.5">
+                    <input type="checkbox" id="chk-sync-to-gsheet" checked
+                        class="w-4 h-4 mt-0.5 rounded text-[#00529C] focus:ring-blue-500 border-slate-300">
+                    <label for="chk-sync-to-gsheet" class="text-xs text-blue-950 font-medium cursor-pointer">
+                        <strong>Đồng thời đẩy dữ liệu sạch lên Google Sheet</strong> (<span
+                            id="lbl-target-sheet-preview" class="font-mono font-bold text-[#00529C]">CP_AUTO</span>
+                        trong file <span class="font-mono font-bold text-emerald-800">Quan_Ly_Chi_Phi</span>).
+                    </label>
+                </div>
+
+                <!-- Preview Actions -->
+                <div class="flex items-center justify-between pt-2">
+                    <button id="btn-cancel-preview"
+                        class="px-4 py-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs transition-all">
+                        ← Chọn file khác
+                    </button>
+                    <button id="btn-confirm-upload"
+                        class="px-5 py-2 rounded-lg bg-[#00529C] hover:bg-[#003870] text-white font-bold text-xs shadow-md transition-all flex items-center gap-2">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                        </svg>
+                        <span>Xác nhận Nạp Dữ Liệu</span>
+                    </button>
+                </div>
+            </div>
+
+            <div class="flex justify-end pt-3 border-t border-slate-200 text-xs mt-3">
+                <button onclick="document.getElementById('upload-modal').classList.add('hidden')"
+                    class="px-4 py-1.5 rounded-lg bg-slate-100 text-slate-700 hover:bg-slate-200 font-bold">
+                    Đóng
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Cấu hình Kết nối Google Sheet -->
+    <div id="gsheet-config-modal"
+        class="hidden fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+        <div
+            class="bg-white border border-slate-200 rounded-2xl max-w-xl w-full p-6 shadow-2xl max-h-[90vh] overflow-y-auto">
+            <div class="flex items-center justify-between pb-3 border-b border-slate-200">
+                <h3 class="text-base font-bold text-slate-900 flex items-center gap-2">
+                    <div
+                        class="w-6 h-6 rounded-md bg-emerald-600 text-white flex items-center justify-center font-bold text-xs shadow-sm">
+                        <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                            <path
+                                d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-7 14H6v-2h6v2zm4-4H6v-2h10v2zm0-4H6V7h10v2z" />
+                        </svg>
+                    </div>
+                    Kết nối Google Sheet Quan_Ly_Chi_Phi (DM_CPHC)
+                </h3>
+                <button id="btn-close-gsheet-modal"
+                    class="text-slate-400 hover:text-slate-700 text-lg font-bold">✕</button>
+            </div>
+
+            <div class="my-4 space-y-4 text-xs text-slate-700">
+                <!-- Info Link -->
+                <div class="bg-emerald-50 border border-emerald-200 rounded-xl p-3 flex items-start gap-2.5">
+                    <span class="text-emerald-700 text-base leading-none">📊</span>
+                    <div>
+                        <div class="font-bold text-emerald-950">File Google Sheet đích:</div>
+                        <a href="https://docs.google.com/spreadsheets/d/1UwV3TbvAfeLZslEazzcFWi5cXsJo98AQmxX5dXH1Pqo/edit?gid=980279299#gid=980279299"
+                            target="_blank"
+                            class="text-blue-700 hover:underline font-mono break-all font-semibold flex items-center gap-1 mt-0.5">
+                            <span>Quan_Ly_Chi_Phi (Sheet: DM_CPHC)</span>
+                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                            </svg>
+                        </a>
+                    </div>
+                </div>
+
+                <!-- URL Input -->
+                <div>
+                    <label class="block font-bold text-slate-900 mb-1">
+                        URL Ứng dụng Web Google Apps Script (Web App URL):
+                    </label>
+                    <input type="url" id="input-gsheet-web-app-url"
+                        placeholder="https://script.google.com/macros/s/.../exec"
+                        class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-xs font-mono text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500">
+                    <p class="text-[11px] text-slate-500 mt-1">
+                        Dán đường link Web App sinh ra sau khi triển khai Apps Script trong file Google Sheet.
+                    </p>
+                </div>
+
+                <!-- Auto-sync checkbox -->
+                <div class="flex items-center gap-2">
+                    <input type="checkbox" id="chk-gsheet-auto-sync" checked
+                        class="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500 border-slate-300">
+                    <label for="chk-gsheet-auto-sync" class="font-semibold text-slate-800 cursor-pointer">
+                        Tự động đồng bộ 2 chiều (Tải khi mở ứng dụng & Đẩy lên khi bấm "Lưu & Tính toán lại")
+                    </label>
+                </div>
+
+                <!-- Connection Test Result Area -->
+                <div id="gsheet-test-result" class="hidden p-2.5 rounded-lg border text-xs"></div>
+
+                <!-- Step-by-step Instructions & 1-Click Copy Code -->
+                <div class="border border-slate-200 rounded-xl overflow-hidden">
+                    <div class="bg-slate-100 p-3 font-bold text-slate-900 flex items-center justify-between cursor-pointer"
+                        onclick="document.getElementById('gsheet-guide-content').classList.toggle('hidden')">
+                        <span class="flex items-center gap-1.5">
+                            <span>📖 Hướng dẫn triển khai Apps Script (1 lần duy nhất - 1 phút)</span>
+                        </span>
+                        <span class="text-slate-500 text-xs font-normal hover:text-[#00529C]">Ẩn / Hiện ▾</span>
+                    </div>
+                    <div id="gsheet-guide-content"
+                        class="p-3.5 bg-slate-50 text-[11px] text-slate-600 space-y-2 leading-relaxed border-t border-slate-200">
+                        <ol class="list-decimal pl-4 space-y-1">
+                            <li>Mở file Google Sheet <a
+                                    href="https://docs.google.com/spreadsheets/d/1UwV3TbvAfeLZslEazzcFWi5cXsJo98AQmxX5dXH1Pqo/edit"
+                                    target="_blank" class="text-blue-600 underline font-bold">Quan_Ly_Chi_Phi</a>.</li>
+                            <li>Vào menu <strong>Tiện ích mở rộng (Extensions)</strong> &gt; <strong>Apps
+                                    Script</strong>.</li>
+                            <li>Dán toàn bộ mã nguồn bên dưới vào file <code
+                                    class="bg-slate-200 px-1 rounded font-mono text-slate-900">Code.gs</code> rồi nhấn
+                                <strong>Ctrl + S</strong> để lưu.
+                            </li>
+                            <li>Bấm nút <strong>Triển khai (Deploy)</strong> ở góc trên bên phải &gt; chọn <strong>Triển
+                                    khai mới (New deployment)</strong>.</li>
+                            <li>Chọn loại <strong>Ứng dụng web (Web app)</strong>:
+                                <ul class="list-disc pl-4 mt-0.5 text-slate-700">
+                                    <li>Thực thi dưới dạng: <strong>Tôi (Me)</strong></li>
+                                    <li>Ai có quyền truy cập: <strong>Bất kỳ ai (Anyone)</strong></li>
+                                </ul>
+                            </li>
+                            <li>Bấm <strong>Triển khai</strong> &gt; Cấp quyền truy cập (Authorize) &gt; Sao chép
+                                <strong>URL ứng dụng web</strong> và dán vào ô bên trên!
+                            </li>
+                        </ol>
+
+                        <div class="pt-2 flex justify-end">
+                            <button id="btn-copy-apps-script-code"
+                                class="px-3 py-1.5 bg-slate-800 hover:bg-slate-900 text-white font-bold rounded-lg shadow-sm text-xs flex items-center gap-1.5 transition-all">
+                                <span>📋 Sao chép mã Google Apps Script</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="flex items-center justify-between pt-3 border-t border-slate-200 text-xs">
+                <button id="btn-test-gsheet-connection"
+                    class="px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 font-bold rounded-lg transition-all">
+                    Kiểm tra kết nối
+                </button>
+                <div class="flex items-center gap-2">
+                    <button id="btn-close-gsheet-modal-2"
+                        class="px-3 py-1.5 rounded-lg bg-slate-100 text-slate-700 hover:bg-slate-200 font-bold">
+                        Đóng
+                    </button>
+                    <button id="btn-save-gsheet-config"
+                        class="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg shadow-md transition-all">
+                        Lưu cấu hình
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Thêm/Sửa Quản trị ↔ Pháp nhân (DM_QTPN) -->
+    <div id="qtpn-edit-modal"
+        class="hidden fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+        <div class="bg-white border border-slate-200 rounded-2xl max-w-lg w-full p-6 shadow-2xl">
+            <div class="flex items-center justify-between pb-3 border-b border-slate-200">
+                <h3 class="text-base font-bold text-slate-900 flex items-center gap-2" id="qtpn-modal-title">
+                    ➕ Thêm Ánh Xạ Quản Trị ↔ Pháp Nhân mới
+                </h3>
+                <button id="btn-close-qtpn-modal"
+                    class="text-slate-400 hover:text-slate-700 text-lg font-bold">✕</button>
+            </div>
+
+            <form id="form-qtpn-modal" class="my-4 space-y-3 text-xs">
+                <input type="hidden" id="qtpn-edit-index" value="-1">
+                <div>
+                    <label class="block font-bold text-slate-800 mb-1" for="qtpn-input-khoi">Khối Đơn vị (<span
+                            class="text-rose-600">*</span>):</label>
+                    <select id="qtpn-input-khoi" required
+                        class="w-full bg-slate-50 border border-slate-300 rounded-lg p-2 font-bold text-[#00529C] focus:ring-2 focus:ring-[#00529C]">
+                        <option value="VPĐH">VPĐH (Văn phòng Điều hành)</option>
+                        <option value="Nhà máy">Nhà máy (Khối Sản xuất)</option>
+                        <option value="CTTT Phía Bắc">CTTT Phía Bắc</option>
+                        <option value="CTTT Phía Nam">CTTT Phía Nam</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block font-bold text-slate-800 mb-1" for="qtpn-input-ma-qt">Mã Quản trị (<span
+                            class="text-rose-600">*</span>):</label>
+                    <input type="text" id="qtpn-input-ma-qt" required list="qtpn-ma-qt-datalist"
+                        placeholder="Ví dụ: QT_VPDH, QT_PP, MB01..."
+                        class="w-full bg-slate-50 border border-slate-300 rounded-lg p-2 font-bold text-[#00529C] focus:ring-2 focus:ring-[#00529C]">
+                    <datalist id="qtpn-ma-qt-datalist"></datalist>
+                </div>
+                <div>
+                    <label class="block font-bold text-slate-800 mb-1" for="qtpn-input-ten-qt">Tên Quản trị (<span
+                            class="text-rose-600">*</span>):</label>
+                    <input type="text" id="qtpn-input-ten-qt" required list="qtpn-ten-qt-datalist"
+                        placeholder="Ví dụ: THACO AUTO, PP THACO AUTO, THACO AUTO HÀ NỘI..."
+                        class="w-full bg-slate-50 border border-slate-300 rounded-lg p-2 font-semibold text-slate-800 focus:ring-2 focus:ring-[#00529C]">
+                    <datalist id="qtpn-ten-qt-datalist"></datalist>
+                </div>
+                <div>
+                    <label class="block font-bold text-slate-800 mb-1" for="qtpn-input-ma-pn">Mã pháp nhân (Mã ĐVCS) (<span
+                            class="text-rose-600">*</span>):</label>
+                    <input type="text" id="qtpn-input-ma-pn" required placeholder="Ví dụ: C1101, C2305, N1309..."
+                        class="w-full bg-slate-50 border border-slate-300 rounded-lg p-2 font-bold text-amber-900 focus:ring-2 focus:ring-amber-500">
+                </div>
+                <div>
+                    <label class="block font-bold text-slate-800 mb-1" for="qtpn-input-ten-pn">Tên pháp nhân / Showroom (<span
+                            class="text-rose-600">*</span>):</label>
+                    <input type="text" id="qtpn-input-ten-pn" required placeholder="Ví dụ: THACO AUTO, PP THACO AUTO..."
+                        class="w-full bg-slate-50 border border-slate-300 rounded-lg p-2 font-semibold text-slate-800 focus:ring-2 focus:ring-amber-500">
+                </div>
+
+                <div class="flex justify-end gap-2 pt-3 border-t border-slate-200">
+                    <button type="button" id="btn-cancel-qtpn-modal"
+                        class="px-4 py-2 rounded-lg bg-slate-100 hover:bg-slate-200 font-bold text-slate-700">Hủy</button>
+                    <button type="submit"
+                        class="px-5 py-2 rounded-lg bg-[#00529C] hover:bg-[#003870] text-white font-bold shadow-md">Lưu
+                        ánh xạ</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="app_data.js?v=20260908_v21"></script>
+    <script src="tooltip.js?v=20260908_v21"></script>
+    <script src="app.js?v=20260908_v21"></script>
+</body>
+
+</html>
