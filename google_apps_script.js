@@ -27,7 +27,54 @@
 
 var SHEET_DM_CPHC = 'DM_CPHC';
 var SHEET_DM_QTPN = 'DM_QTPN';
+var SHEET_DM_CBNV = 'DM_CBNV';
 var COST_SHEETS = ['CP_AUTO', 'CP_PP', 'CP_CTTT', 'CP_VPDH', 'CP_NHAMAY', 'CP_CTTT_MB', 'CP_CTTT_MN'];
+
+var CBNV_COLUMNS = [
+  'STT',
+  'Khối Đơn Vị',
+  'Mã Quản trị',
+  'Tên Quản trị',
+  'Mã ĐVCS',
+  'Tên Pháp Nhân / Showroom',
+  'Năm',
+  'Định Biên (Người)',
+  'Thực Tế (Người)',
+  'Ghi Chú'
+];
+
+var SCRIPT_PROP_API_KEY = 'API_KEY';
+var DEFAULT_SEED_API_KEY = 'THACO_CPHC_2026_SECURE_TOKEN';
+
+/**
+ * Lấy khóa API_KEY từ Script Properties, tự động khởi tạo nếu chưa có
+ */
+function getOrInitApiKey() {
+  var props = PropertiesService.getScriptProperties();
+  var key = props.getProperty(SCRIPT_PROP_API_KEY);
+  if (!key) {
+    key = DEFAULT_SEED_API_KEY;
+    props.setProperty(SCRIPT_PROP_API_KEY, key);
+  }
+  return key;
+}
+
+/**
+ * Kiểm tra tính hợp lệ của API_KEY trong request GET hoặc POST
+ */
+function checkApiKey(e, payload) {
+  var configuredKey = getOrInitApiKey();
+  var providedKey = '';
+
+  if (e && e.parameter) {
+    providedKey = e.parameter.api_key || e.parameter.apiKey || e.parameter.key || '';
+  }
+  if (!providedKey && payload) {
+    providedKey = payload.api_key || payload.apiKey || payload.key || '';
+  }
+
+  return Boolean(providedKey && String(providedKey).trim() === String(configuredKey).trim());
+}
 
 var COST_COLUMNS = [
   'STT',
@@ -54,15 +101,44 @@ var COST_COLUMNS = [
 function onOpen() {
   SpreadsheetApp.getUi()
     .createMenu('🚗 THACO AUTO')
+    .addItem('🔐 Kiểm tra / Đổi khóa bảo mật API_KEY', 'manageApiKeyMenu')
+    .addSeparator()
     .addItem('🔄 Kiểm tra cấu trúc DM_CPHC', 'checkDmStructure')
     .addItem('✨ Chuẩn hóa định dạng DM_CPHC', 'formatDmSheet')
     .addSeparator()
     .addItem('🔄 Kiểm tra cấu trúc DM_QTPN', 'checkDmQtpnStructure')
     .addItem('✨ Chuẩn hóa định dạng DM_QTPN', 'formatDmQtpnSheet')
     .addSeparator()
+    .addItem('🔄 Kiểm tra cấu trúc DM_CBNV', 'checkDmCbnvStructure')
+    .addItem('✨ Chuẩn hóa định dạng DM_CBNV', 'formatDmCbnvSheet')
+    .addSeparator()
     .addItem('📊 Khởi tạo cấu trúc các Sheet Chi phí (CP_AUTO, CP_PP, CP_CTTT)', 'initCostSheets')
     .addItem('✨ Chuẩn hóa định dạng các Sheet Chi phí', 'formatAllCostSheets')
     .addToUi();
+}
+
+/**
+ * Hàm quản trị khóa API_KEY trực tiếp từ Menu Google Sheet
+ */
+function manageApiKeyMenu() {
+  var ui = SpreadsheetApp.getUi();
+  var currentKey = getOrInitApiKey();
+
+  var res = ui.prompt(
+    '🔐 QUẢN TRỊ KHÓA BẢO MẬT API_KEY (THACO AUTO)',
+    'Khóa API_KEY hiện tại:\n' + currentKey + '\n\nNhập khóa API_KEY mới (hoặc bấm Hủy để giữ nguyên):',
+    ui.ButtonSet.OK_CANCEL
+  );
+
+  if (res.getSelectedButton() === ui.Button.OK) {
+    var newKey = res.getResponseText().trim();
+    if (!newKey) {
+      ui.alert('⚠️ Khóa API_KEY không được để trống.');
+      return;
+    }
+    PropertiesService.getScriptProperties().setProperty(SCRIPT_PROP_API_KEY, newKey);
+    ui.alert('✅ Đã cập nhật khóa API_KEY thành công!\n\nKhóa mới: ' + newKey + '\n\nVui lòng cập nhật khóa này vào Web App trong mục "Cài đặt kết nối".');
+  }
 }
 
 /**
@@ -73,13 +149,34 @@ function onOpen() {
  * 2. ?action=get_dm               : Chỉ đọc danh mục DM_CPHC
  * 3. ?action=get_qtpn             : Chỉ đọc danh mục DM_QTPN
  * 4. ?action=get_cphc_data&sheet=CP_AUTO : Chỉ đọc dữ liệu của 1 sheet chi phí cụ thể
+ * 5. ?action=test_key             : Kiểm tra xác thực khóa API_KEY
  * =========================================================================================
  */
 function doGet(e) {
   try {
     var params = e ? e.parameter || {} : {};
+
+    // 🔒 LỚP BẢO MẬT: Kiểm tra API_KEY trước khi xử lý bất kỳ yêu cầu nào
+    if (!checkApiKey(e, null)) {
+      return jsonResponse({
+        status: 'error',
+        code: 401,
+        message: 'Từ chối truy cập: Khóa API_KEY không hợp lệ hoặc chưa được cung cấp. Vui lòng kiểm tra lại cấu hình kết nối trên Web App.'
+      });
+    }
+
     var action = params.action || 'get_all';
     var sheetName = params.sheet || '';
+
+    // Kiểm tra kết nối nhanh (Ping/Test key)
+    if (action === 'test_key' || action === 'ping') {
+      return jsonResponse({
+        status: 'success',
+        message: 'Xác thực API_KEY thành công! Kết nối bảo mật hoạt động chuẩn xác.',
+        authenticated: true,
+        timestamp: new Date().toISOString()
+      });
+    }
 
     // Trường hợp 1: Đọc riêng 1 sheet chi phí
     if (action === 'get_cphc_data' && sheetName) {
@@ -96,7 +193,12 @@ function doGet(e) {
       return handleGetDmQtpn();
     }
 
-    // Trường hợp 4: Mặc định (action === 'get_all' hoặc không truyền tham số):
+    // Trường hợp 4: Đọc riêng Danh mục Định biên / Nhân sự DM_CBNV
+    if (action === 'get_cbnv') {
+      return handleGetDmCbnv();
+    }
+
+    // Trường hợp 5: Mặc định (action === 'get_all' hoặc không truyền tham số):
     return handleGetAllData();
 
   } catch (err) {
@@ -113,7 +215,8 @@ function doGet(e) {
  * Hỗ trợ các chế độ:
  * 1. Ghi chi phí đã làm sạch: payload.action === 'save_cphc_data'
  * 2. Ghi danh mục Quản trị ↔ Pháp nhân: payload.action === 'save_qtpn' hoặc payload.qtpnMappings
- * 3. Ghi danh mục DM_CPHC: payload.action === 'save_dm' hoặc payload.categories
+ * 3. Ghi danh mục Định biên / Nhân sự: payload.action === 'save_cbnv' hoặc payload.cbnvData
+ * 4. Ghi danh mục DM_CPHC: payload.action === 'save_dm' hoặc payload.categories
  * =========================================================================================
  */
 function doPost(e) {
@@ -125,6 +228,15 @@ function doPost(e) {
 
     var payload = JSON.parse(raw);
 
+    // 🔒 LỚP BẢO MẬT: Kiểm tra API_KEY trước khi thực hiện bất kỳ thao tác ghi/xóa nào
+    if (!checkApiKey(e, payload)) {
+      return jsonResponse({
+        status: 'error',
+        code: 401,
+        message: 'Từ chối truy cập: Khóa API_KEY không hợp lệ hoặc chưa được cung cấp. Thao tác ghi dữ liệu bị chặn.'
+      });
+    }
+
     // Trường hợp 1: Ghi dữ liệu chi phí đã làm sạch từ Bravo (CP_AUTO / CP_PP / CP_CTTT)
     if (payload.action === 'save_cphc_data') {
       return handleSaveCostData(payload);
@@ -135,7 +247,12 @@ function doPost(e) {
       return handleSaveDmQtpn(payload);
     }
 
-    // Trường hợp 3: Ghi danh mục DM_CPHC
+    // Trường hợp 3: Ghi danh mục Định biên / Nhân sự DM_CBNV
+    if (payload.action === 'save_cbnv' || payload.cbnvData) {
+      return handleSaveDmCbnv(payload);
+    }
+
+    // Trường hợp 4: Ghi danh mục DM_CPHC
     return handleSaveDmCphc(payload);
 
   } catch (err) {
@@ -160,7 +277,10 @@ function handleGetAllData() {
   // 2. Đọc Danh mục DM_QTPN
   var qtpnMappings = readDmQtpn(ss);
 
-  // 3. Đọc các sheet chi phí
+  // 3. Đọc Danh mục Định biên / Nhân sự DM_CBNV
+  var cbnvData = readDmCbnv(ss);
+
+  // 4. Đọc các sheet chi phí
   var costSheets = {};
   var allCostRows = [];
 
@@ -175,6 +295,7 @@ function handleGetAllData() {
     updatedAt: new Date().toISOString(),
     categories: categories,
     qtpnMappings: qtpnMappings,
+    cbnvData: cbnvData,
     costSheets: costSheets,
     allCostRows: allCostRows,
     totalCostRows: allCostRows.length
@@ -493,6 +614,144 @@ function handleSaveDmQtpn(payload) {
 
 /**
  * =========================================================================================
+ * XỬ LÝ ĐỊNH BIÊN & NHÂN SỰ CB-NV (DM_CBNV)
+ * =========================================================================================
+ */
+function readDmCbnv(ss) {
+  var sheet = ss.getSheetByName(SHEET_DM_CBNV);
+  if (!sheet || sheet.getLastRow() <= 1) return [];
+
+  var data = sheet.getDataRange().getValues();
+  if (data.length <= 1) return [];
+
+  var headers = data[0].map(function(h) { return String(h || '').trim().toLowerCase(); });
+  var colMap = { stt: 0, khoi: -1, maQt: -1, tenQt: -1, maPn: -1, tenPn: -1, nam: -1, dinhBien: -1, thucTe: -1, ghiChu: -1 };
+
+  for (var c = 0; c < headers.length; c++) {
+    var h = headers[c];
+    if (h.indexOf('khối') !== -1 || h.indexOf('khoi') !== -1) colMap.khoi = c;
+    else if (h.indexOf('mã quản trị') !== -1 || h.indexOf('ma qt') !== -1) colMap.maQt = c;
+    else if (h.indexOf('tên quản trị') !== -1 || h.indexOf('ten qt') !== -1) colMap.tenQt = c;
+    else if (h.indexOf('mã đvcs') !== -1 || h.indexOf('mã pn') !== -1 || h.indexOf('mã pháp nhân') !== -1) colMap.maPn = c;
+    else if (h.indexOf('tên pháp nhân') !== -1 || h.indexOf('tên showroom') !== -1 || h.indexOf('tên đvcs') !== -1 || h.indexOf('tên pn') !== -1) colMap.tenPn = c;
+    else if (h.indexOf('năm') !== -1 || h.indexOf('nam') !== -1) colMap.nam = c;
+    else if (h.indexOf('định biên') !== -1 || h.indexOf('dinh bien') !== -1) colMap.dinhBien = c;
+    else if (h.indexOf('thực tế') !== -1 || h.indexOf('thuc te') !== -1) colMap.thucTe = c;
+    else if (h.indexOf('ghi chú') !== -1 || h.indexOf('ghi chu') !== -1) colMap.ghiChu = c;
+  }
+
+  var list = [];
+  for (var r = 1; r < data.length; r++) {
+    var row = data[r];
+    if (!row || row.every(function(cell) { return cell === '' || cell === null; })) continue;
+
+    var maPn = colMap.maPn !== -1 ? String(row[colMap.maPn] || '').trim() : '';
+    var tenPn = colMap.tenPn !== -1 ? String(row[colMap.tenPn] || '').trim() : '';
+    if (!maPn && !tenPn) continue;
+
+    list.push({
+      stt: parseInt(row[colMap.stt], 10) || (list.length + 1),
+      khoi: colMap.khoi !== -1 ? String(row[colMap.khoi] || '').trim() : 'VPĐH',
+      maQt: colMap.maQt !== -1 ? String(row[colMap.maQt] || '').trim() : '',
+      tenQt: colMap.tenQt !== -1 ? String(row[colMap.tenQt] || '').trim() : '',
+      maPn: maPn,
+      tenPn: tenPn,
+      nam: colMap.nam !== -1 ? (parseInt(row[colMap.nam], 10) || 2026) : 2026,
+      dinhBien: colMap.dinhBien !== -1 ? (Number(row[colMap.dinhBien]) || 0) : 0,
+      thucTe: colMap.thucTe !== -1 ? (Number(row[colMap.thucTe]) || 0) : 0,
+      ghiChu: colMap.ghiChu !== -1 ? String(row[colMap.ghiChu] || '').trim() : ''
+    });
+  }
+  return list;
+}
+
+function handleGetDmCbnv() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var cbnvList = readDmCbnv(ss);
+  return jsonResponse({
+    status: 'success',
+    sheet: SHEET_DM_CBNV,
+    count: cbnvList.length,
+    updatedAt: new Date().toISOString(),
+    cbnvData: cbnvList
+  });
+}
+
+function handleSaveDmCbnv(payload) {
+  var list = payload.cbnvData || payload.data || payload.rows;
+  if (!list || !Array.isArray(list)) {
+    return jsonResponse({ status: 'error', message: 'Mảng cbnvData không đúng định dạng.' });
+  }
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SHEET_DM_CBNV);
+  if (!sheet) {
+    sheet = ss.insertSheet(SHEET_DM_CBNV);
+  }
+
+  sheet.clear();
+
+  var headerRow = [
+    'STT',
+    'Khối Đơn Vị',
+    'Mã Quản trị',
+    'Tên Quản trị',
+    'Mã ĐVCS',
+    'Tên Pháp Nhân / Showroom',
+    'Năm',
+    'Định Biên (Người)',
+    'Thực Tế (Người)',
+    'Ghi Chú'
+  ];
+
+  var rows = [headerRow];
+  list.forEach(function(item, idx) {
+    rows.push([
+      item.stt || (idx + 1),
+      item.khoi || 'VPĐH',
+      item.maQt || '',
+      item.tenQt || '',
+      item.maPn || item.code || '',
+      item.tenPn || item.name || '',
+      item.nam || item.year || 2026,
+      Number(item.dinhBien) || 0,
+      Number(item.thucTe) || 0,
+      item.ghiChu || ''
+    ]);
+  });
+
+  sheet.getRange(1, 1, rows.length, 10).setValues(rows);
+
+  var headerRange = sheet.getRange(1, 1, 1, 10);
+  headerRange.setBackground('#00529C')
+             .setFontColor('#FFFFFF')
+             .setFontWeight('bold')
+             .setHorizontalAlignment('center')
+             .setVerticalAlignment('middle');
+  sheet.setRowHeight(1, 35);
+
+  if (rows.length > 1) {
+    sheet.getRange(2, 1, rows.length - 1, 1).setHorizontalAlignment('center');
+    sheet.getRange(2, 2, rows.length - 1, 1).setHorizontalAlignment('center');
+    sheet.getRange(2, 3, rows.length - 1, 1).setHorizontalAlignment('center');
+    sheet.getRange(2, 5, rows.length - 1, 1).setHorizontalAlignment('center');
+    sheet.getRange(2, 7, rows.length - 1, 1).setHorizontalAlignment('center');
+    sheet.getRange(2, 8, rows.length - 1, 2).setNumberFormat('#,##0').setHorizontalAlignment('right');
+  }
+
+  sheet.setFrozenRows(1);
+  sheet.autoResizeColumns(1, 10);
+
+  return jsonResponse({
+    status: 'success',
+    message: 'Đã đồng bộ thành công ' + list.length + ' dòng nhân sự lên Google Sheet DM_CBNV!',
+    count: list.length,
+    updatedAt: new Date().toISOString()
+  });
+}
+
+/**
+ * =========================================================================================
  * XỬ LÝ CHI PHÍ ĐÃ LÀM SẠCH (CP_AUTO / CP_PP / CP_CTTT)
  * =========================================================================================
  */
@@ -690,8 +949,27 @@ function formatDmQtpnSheet() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName(SHEET_DM_QTPN);
   if (!sheet || sheet.getLastRow() < 1) return;
-  sheet.autoResizeColumns(1, 5);
+  sheet.autoResizeColumns(1, 6);
   SpreadsheetApp.getActiveSpreadsheet().toast('Đã định dạng lại sheet DM_QTPN!', 'THACO AUTO', 3);
+}
+
+function checkDmCbnvStructure() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SHEET_DM_CBNV);
+  if (!sheet) {
+    SpreadsheetApp.getUi().alert('Chưa có sheet "' + SHEET_DM_CBNV + '". Hãy bấm đồng bộ từ Web App để tự động tạo.');
+    return;
+  }
+  var count = Math.max(0, sheet.getLastRow() - 1);
+  SpreadsheetApp.getUi().alert('Sheet DM_CBNV đang có ' + count + ' dòng nhân sự.');
+}
+
+function formatDmCbnvSheet() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SHEET_DM_CBNV);
+  if (!sheet || sheet.getLastRow() < 1) return;
+  sheet.autoResizeColumns(1, 10);
+  SpreadsheetApp.getActiveSpreadsheet().toast('Đã định dạng lại sheet DM_CBNV!', 'THACO AUTO', 3);
 }
 
 function initCostSheets() {

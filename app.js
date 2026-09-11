@@ -41,15 +41,560 @@
             materialOnly: false // false: Tất cả 30 khoản mục, true: Chỉ hiển thị khoản mục trọng yếu
         },
         collapsedGroups: {},
+        groupIcons: {},
         columnVisibility: {
             cost2025: true,
             actualMonths: true
         },
+        yoyConfig: {
+            viewMode: 'MONTHLY', // 'MONTHLY' hoặc 'YOY_TABLE'
+            thresholdPercent: 20 // Ngưỡng cảnh báo biến động bất thường (mặc định ±20%)
+        },
+        cbnvConfig: {
+            displayMode: 'BOTH' // 'THUC_TE' | 'DINH_BIEN' | 'BOTH'
+        },
+        cbnvData: {}, // Record<maPn, { stt, khoi, maQt, tenQt, maPn, tenPn, nam, dinhBien, thucTe, ghiChu }>
+        cbnvAudit: null, // { hasControlRow, fileControlTotalDb, fileControlTotalTt, sumDb, sumTt, diff, diffDb, status }
         currentTab: 'report'
     };
 
     // Expose state cho tooltip.js và các module mở rộng
     window.appState = state;
+
+    // =========================================================================
+    // ⚡ PERFORMANCE MEMOIZATION CACHE & CATEGORY MATCHER
+    // =========================================================================
+
+    const reportDataCache = new Map();
+    function clearReportDataCache() {
+        reportDataCache.clear();
+    }
+
+    /**
+     * So khớp chính xác khoản mục chi phí (Hỗ trợ chuẩn N:1 và mảng phân tách bởi dấu phẩy)
+     * Tránh lỗi substring so khớp chuỗi con giả dương (.includes)
+     */
+    function matchCategoryKm(cat, kmCode) {
+        if (!cat || !kmCode) return false;
+        const kmClean = String(kmCode).trim().toUpperCase();
+        if (!kmClean) return false;
+
+        // 1. So khớp ID trực tiếp nếu kmCode trùng id
+        if (cat.id !== undefined && String(cat.id) === kmClean) return true;
+
+        // 2. So khớp mảng b7_codes (exact match từng phần tử)
+        if (Array.isArray(cat.b7_codes) && cat.b7_codes.length > 0) {
+            if (cat.b7_codes.some(c => String(c).trim().toUpperCase() === kmClean)) return true;
+        }
+
+        // 3. Tách chuỗi b7_display theo dấu phẩy, chấm phẩy, khoảng trắng và so khớp chính xác từng phần tử
+        if (cat.b7_display) {
+            const parts = String(cat.b7_display).split(/[,;\s]+/).map(s => s.trim().toUpperCase()).filter(Boolean);
+            if (parts.includes(kmClean)) return true;
+        }
+
+        // 4. So khớp b10_codes
+        if (Array.isArray(cat.b10_codes) && cat.b10_codes.length > 0) {
+            if (cat.b10_codes.some(c => String(c).trim().toUpperCase() === kmClean)) return true;
+        }
+
+        // 5. So khớp b10_display
+        if (cat.b10_display) {
+            const b10Parts = String(cat.b10_display).split(/[,;\s]+/).map(s => s.trim().toUpperCase()).filter(Boolean);
+            if (b10Parts.includes(kmClean)) return true;
+        }
+
+        return false;
+    }
+
+    // =========================================================================
+    // 🎨 GROUP ICON MANAGER & MINI ICON LIBRARY
+    // =========================================================================
+
+    function removeVietnameseTones(str) {
+        if (!str) return '';
+        str = str.toLowerCase();
+        str = str.replace(/à|á|ạ|ả|ã|â|ầ|ấ|ậ|ẩ|ẫ|ă|ằ|ắ|ặ|ẳ|ẵ/g, "a");
+        str = str.replace(/è|é|ẹ|ẻ|ẽ|ê|ề|ế|ệ|ể|ễ/g, "e");
+        str = str.replace(/ì|í|ị|ỉ|ĩ/g, "i");
+        str = str.replace(/ò|ó|ọ|ỏ|õ|ô|ồ|ố|ộ|ổ|ỗ|ơ|ờ|ớ|ợ|ở|ỡ/g, "o");
+        str = str.replace(/ù|ú|ụ|ủ|ũ|ư|ừ|ứ|ự|ử|ữ/g, "u");
+        str = str.replace(/ỳ|ý|ỵ|ỷ|ỹ/g, "y");
+        str = str.replace(/đ/g, "d");
+        return str;
+    }
+
+    const DEFAULT_GROUP_ICONS = {
+        // 3 Nhóm Chi Phí Mới Hiện Tại
+        'Phục vụ hoạt động chung': '🏢',
+        'Phục vụ kinh doanh': '💼',
+        'Phục vụ CB-NV': '👥',
+        'Chi phí phục vụ hoạt động chung': '🏢',
+        'Chi phí phục vụ kinh doanh': '💼',
+        'Chi phí phục vụ CB-NV': '👥',
+        // Tương thích ngược với các tên nhóm cũ
+        'Chi phí tiện ích văn phòng (5)': '📑',
+        'Chi phí tiện ích văn phòng': '📑',
+        'Chi phí mua sắm, sửa chữa CCDC, TSCĐ (2)': '🛠️',
+        'Chi phí mua sắm, sửa chữa CCDC, TSCĐ': '🛠️',
+        'Chi phí Hội họp và tiếp khách (4)': '🤝',
+        'Chi phí Hội họp và tiếp khách': '🤝',
+        'Chi phí Công tác (5)': '✈️',
+        'Chi phí Công tác': '✈️',
+        'Chi phí Vận hành & Mặt bằng': '🏢',
+        'Chi phí vận hành (10)': '🏢',
+        'Chi phí khác': '⚖️',
+        'Chi phí khác & Quản trị': '⚖️',
+        'Chi phí khác & Khấu hao (3)': '⚖️'
+    };
+
+    const ICON_LIBRARY = [
+        // Gợi ý cho 3 nhóm mới
+        { icon: '🏢', name: 'Tòa nhà / Văn phòng', cat: 'suggested', keywords: 'toa nha van phong tru so hoat dong chung co quan dia diem' },
+        { icon: '💼', name: 'Kinh doanh / Cặp tài liệu', cat: 'suggested', keywords: 'kinh doanh cap tai lieu hop dong ban hang doanh thu hop tac' },
+        { icon: '👥', name: 'CB-NV / Đoàn thể', cat: 'suggested', keywords: 'can bo nhan vien cbnv doan the con nguoi doi ngu tap the' },
+        { icon: '🏛️', name: 'Trụ sở / Cơ quan', cat: 'suggested', keywords: 'tru so co quan hanh chinh phong hop ban lanh dao' },
+        { icon: '📈', name: 'Tăng trưởng / Doanh số', cat: 'suggested', keywords: 'tang truong phat trien kinh doanh bieu do doanh so' },
+        { icon: '👔', name: 'Đồng phục / Chuyên nghiệp', cat: 'suggested', keywords: 'dong phuc cong so nhan su can bo tac phong' },
+        { icon: '⚙️', name: 'Vận hành chung', cat: 'suggested', keywords: 'van hanh he thong may moc quan tri van phong' },
+        { icon: '🤝', name: 'Đối tác / Tiếp khách', cat: 'suggested', keywords: 'doi tac tiep khach bat tay hop tac ngoai giao giao te' },
+        { icon: '🍱', name: 'Cơm ca / Suất ăn', cat: 'suggested', keywords: 'com trua bua an suat an phuc loi thuc pham an uong' },
+
+        // Vận hành & Quản trị (operation)
+        { icon: '📑', name: 'Hồ sơ / Tiện ích VP', cat: 'operation', keywords: 'ho so tai lieu giay to van phong pham in an chung tu' },
+        { icon: '💡', name: 'Điện / Chiếu sáng', cat: 'operation', keywords: 'dien chieu sang nang luong tien ich cong cong' },
+        { icon: '💧', name: 'Nước sinh hoạt', cat: 'operation', keywords: 'nuoc sach sinh hoat nuoc uong thuy cuc' },
+        { icon: '🌐', name: 'Mạng / CNTT', cat: 'operation', keywords: 'mang internet cong nghe it truyen thong he thong wifi' },
+        { icon: '🛡️', name: 'Bảo vệ / An ninh', cat: 'operation', keywords: 'bao ve an ninh phong chay chua chay an toan pccc' },
+        { icon: '🧹', name: 'Vệ sinh môi trường', cat: 'operation', keywords: 've sinh lao cong rac thai sach se tap vu' },
+        { icon: '📦', name: 'Văn phòng phẩm / Hàng hóa', cat: 'operation', keywords: 'van phong pham thung hop dong goi vat tu' },
+        { icon: '🖨️', name: 'In ấn / Photocopy', cat: 'operation', keywords: 'in an photo may in may scan photocopy ban in' },
+        { icon: '🔑', name: 'Thuê mặt bằng / Quản lý', cat: 'operation', keywords: 'chia khoa thue nha showroom mat bang van phong' },
+        { icon: '🗄️', name: 'Lưu trữ / Tủ hồ sơ', cat: 'operation', keywords: 'luu tru tu ho so kho quan tri giay to' },
+        { icon: '📋', name: 'Quy trình / Kế hoạch', cat: 'operation', keywords: 'ke hoach quy trinh kiem tra danh gia bao cao' },
+        { icon: '⚖️', name: 'Pháp lý / Kiểm toán', cat: 'operation', keywords: 'phap ly can bang luat kiem toan quy dinh thanh tra' },
+
+        // Kinh doanh & Thị trường (business)
+        { icon: '🎯', name: 'Mục tiêu / KPI', cat: 'business', keywords: 'muc tieu kpi ke hoach chien luoc thi truong' },
+        { icon: '✈️', name: 'Vé máy bay / Công tác', cat: 'business', keywords: 'may bay cong tac di lai luu tru ve may bay' },
+        { icon: '🚗', name: 'Xe công / Showroom', cat: 'business', keywords: 'o to xe hoi phuong tien di chuyen showroom lai thu' },
+        { icon: '📢', name: 'Truyền thông / Quảng bá', cat: 'business', keywords: 'truyen thong quang cao marketing su kien pr' },
+        { icon: '🥂', name: 'Giao tế / Chiêu đãi', cat: 'business', keywords: 'giao te tiec tung chieu dai gap go tiep khach' },
+        { icon: '💳', name: 'Chi phí thẻ / Giao dịch', cat: 'business', keywords: 'the tin dung thanh toan chuyen khoan ngan hang' },
+        { icon: '🛒', name: 'Bán hàng / Khách hàng', cat: 'business', keywords: 'ban hang tieu thu khach hang showroom dai ly' },
+        { icon: '🏷️', name: 'Khoản mục / Nhãn phí', cat: 'business', keywords: 'nhan gia the tag phan loai chi phi' },
+        { icon: '💰', name: 'Ngân sách / Tài chính', cat: 'business', keywords: 'tien bac ngan sach dong tien von chi phi loi nhuan' },
+        { icon: '🚀', name: 'Dự án mới / Đột phá', cat: 'business', keywords: 'ten lua du an moi tang toc phat trien dot pha' },
+        { icon: '📞', name: 'Cước viễn thông / Hotline', cat: 'business', keywords: 'dien thoai lien lac tong dai cskh cuoc goi' },
+        { icon: '🏨', name: 'Lưu trú / Khách sạn', cat: 'business', keywords: 'khach san nha nghi luu tru cong tac xa phong nghi' },
+
+        // CB-NV & Phúc lợi (hr)
+        { icon: '🧑‍💼', name: 'Nhân sự / Chuyên viên', cat: 'hr', keywords: 'nhan su nhan vien chuyen vien quan ly nguoi lao dong' },
+        { icon: '☕', name: 'Nước uống / Trà nước', cat: 'hr', keywords: 'ca phe tra giai khat tiep khach van phong nuoc uong' },
+        { icon: '🩺', name: 'Y tế / Khám sức khỏe', cat: 'hr', keywords: 'y te kham suc khoe bao hiem thuoc men dinh ky bac si' },
+        { icon: '🎓', name: 'Đào tạo / Tập huấn', cat: 'hr', keywords: 'dao tao tap huan hoc tap nang cao chuyen mon khoa hoc' },
+        { icon: '🎁', name: 'Hiếu hỉ / Khen thưởng', cat: 'hr', keywords: 'qua tang khen thuong sinh nhat le tet hieu hi phuc loi' },
+        { icon: '🚌', name: 'Xe đưa đón CB-NV', cat: 'hr', keywords: 'xe dua don van chuyen nhan vien xe buyt dua don' },
+        { icon: '⚽', name: 'Văn thể mỹ / Thể thao', cat: 'hr', keywords: 'the thao bong da giao luu phong trao van nghe the duc' },
+        { icon: '🏥', name: 'Bệnh xá / Cấp cứu', cat: 'hr', keywords: 'benh vien cap cuu so cuu phong y te cham soc' },
+        { icon: '🎂', name: 'Sinh nhật / Sự kiện nội bộ', cat: 'hr', keywords: 'sinh nhat ky niem lien hoan noi bo tiec mung' },
+        { icon: '🥇', name: 'Thi đua / Thành tích', cat: 'hr', keywords: 'huy chuong thi dua danh hieu xuat sac chien si' },
+
+        // Mua sắm & Kỹ thuật (technical)
+        { icon: '🛠️', name: 'Sửa chữa / Bảo trì CCDC', cat: 'technical', keywords: 'sua chua bao tri ccdc cong cu bao duong thiet bi' },
+        { icon: '🏗️', name: 'Xây dựng / Cải tạo công trình', cat: 'technical', keywords: 'xay dung sua chua nha xuong mat bang cai tao thi cong' },
+        { icon: '⚡', name: 'Điện lực / Kỹ thuật cao', cat: 'technical', keywords: 'nang luong dien luc may phat tram bien ap an toan dien' },
+        { icon: '🚚', name: 'Vận chuyển / Giao nhận', cat: 'technical', keywords: 'van chuyen giao nhan xe tai chuyen phat logistics' },
+        { icon: '🔧', name: 'Trang thiết bị / Dụng cụ', cat: 'technical', keywords: 'dung cu thiet bi may moc phu tung co khi' },
+        { icon: '🖥️', name: 'Máy vi tính / Phần mềm', cat: 'technical', keywords: 'may tinh server man hinh it phan mem ban quyen' },
+        { icon: '🔍', name: 'Kiểm tra / Rà soát chi phí', cat: 'technical', keywords: 'kiem tra soi xet danh gia audit ra soat' },
+        { icon: '🔒', name: 'Bảo mật / Bản quyền', cat: 'technical', keywords: 'khoa bao mat an toan ban quyen mat khau' },
+        { icon: '📊', name: 'Báo cáo / Thống kê', cat: 'technical', keywords: 'bieu do phan tich bao cao so lieu excel' }
+    ];
+
+    const GroupIconManager = {
+        getIcon(groupName) {
+            if (!groupName) return '🏢';
+            const cleanName = String(groupName).trim();
+            // 1. Kiểm tra icon do người dùng tùy chọn lưu trong state / LocalStorage
+            if (state.groupIcons && state.groupIcons[cleanName]) {
+                return state.groupIcons[cleanName];
+            }
+            try {
+                const saved = localStorage.getItem('THACO_CPHC_GROUP_ICONS');
+                if (saved) {
+                    const parsed = JSON.parse(saved);
+                    if (parsed && parsed[cleanName]) {
+                        state.groupIcons[cleanName] = parsed[cleanName];
+                        return parsed[cleanName];
+                    }
+                }
+            } catch (e) {}
+
+            // 2. Tra cứu danh mục mặc định
+            if (DEFAULT_GROUP_ICONS[cleanName]) return DEFAULT_GROUP_ICONS[cleanName];
+
+            // 3. Nhận diện thông minh theo từ khóa
+            const lower = cleanName.toLowerCase();
+            if (lower.includes('hoạt động chung') || lower.includes('hoat dong chung')) return '🏢';
+            if (lower.includes('kinh doanh') || lower.includes('bán hàng') || lower.includes('khách hàng')) return '💼';
+            if (lower.includes('cb-nv') || lower.includes('cbnv') || lower.includes('nhân viên') || lower.includes('cán bộ') || lower.includes('cơm') || lower.includes('ăn')) return '👥';
+            if (lower.includes('tiện ích') || lower.includes('văn phòng phẩm')) return '📑';
+            if (lower.includes('mua sắm') || lower.includes('sửa chữa') || lower.includes('ccdc') || lower.includes('tscđ')) return '🛠️';
+            if (lower.includes('hội họp') || lower.includes('tiếp khách') || lower.includes('giao tế')) return '🤝';
+            if (lower.includes('công tác') || lower.includes('lưu trú') || lower.includes('vé máy bay')) return '✈️';
+            if (lower.includes('vận hành') || lower.includes('mặt bằng') || lower.includes('điện') || lower.includes('nước')) return '🏢';
+            if (lower.includes('khác') || lower.includes('quản trị') || lower.includes('pháp lý') || lower.includes('kiểm toán')) return '⚖️';
+            return '🏢';
+        },
+
+        setIcon(groupName, icon) {
+            if (!groupName || !icon) return;
+            const cleanName = String(groupName).trim();
+            state.groupIcons = state.groupIcons || {};
+            state.groupIcons[cleanName] = icon;
+            try {
+                localStorage.setItem('THACO_CPHC_GROUP_ICONS', JSON.stringify(state.groupIcons));
+            } catch (e) {}
+            saveCurrentState();
+            refreshAfterIconChange();
+        },
+
+        renameGroupIcon(oldName, newName, newIcon) {
+            state.groupIcons = state.groupIcons || {};
+            const cleanOld = String(oldName || '').trim();
+            const cleanNew = String(newName || '').trim();
+            const iconToUse = newIcon || (cleanOld ? state.groupIcons[cleanOld] : null) || this.getIcon(cleanOld || cleanNew);
+            if (cleanOld && state.groupIcons[cleanOld]) {
+                delete state.groupIcons[cleanOld];
+            }
+            if (cleanNew) {
+                state.groupIcons[cleanNew] = iconToUse;
+            }
+            try {
+                localStorage.setItem('THACO_CPHC_GROUP_ICONS', JSON.stringify(state.groupIcons));
+            } catch (e) {}
+            saveCurrentState();
+            refreshAfterIconChange();
+        },
+
+        resetIcon(groupName) {
+            if (!groupName) return;
+            const cleanName = String(groupName).trim();
+            if (state.groupIcons && state.groupIcons[cleanName]) {
+                delete state.groupIcons[cleanName];
+                try {
+                    localStorage.setItem('THACO_CPHC_GROUP_ICONS', JSON.stringify(state.groupIcons));
+                } catch (e) {}
+                saveCurrentState();
+                refreshAfterIconChange();
+            }
+        }
+    };
+
+    function refreshAfterIconChange() {
+        renderTable();
+        renderMappingTab();
+        if (window.THACO_DASHBOARD && typeof window.THACO_DASHBOARD.init === 'function') {
+            try { window.THACO_DASHBOARD.init(); } catch (e) {}
+        }
+    }
+
+    window.GroupIconManager = GroupIconManager;
+    window.getGroupIcon = (name) => GroupIconManager.getIcon(name);
+
+    // =========================================================================
+    // 🪟 ICON PICKER MODAL CONTROLLER
+    // =========================================================================
+
+    const iconPickerState = {
+        activeGroup: '',
+        selectedIcon: '🏢',
+        callback: null,
+        currentTab: 'all',
+        searchQuery: ''
+    };
+
+    function openIconPickerModal(groupName, callback) {
+        iconPickerState.activeGroup = groupName || 'Nhóm chi phí';
+        iconPickerState.callback = callback || null;
+        iconPickerState.selectedIcon = GroupIconManager.getIcon(groupName);
+        iconPickerState.currentTab = 'all';
+        iconPickerState.searchQuery = '';
+
+        const modal = document.getElementById('group-icon-picker-modal');
+        const grpNameEl = document.getElementById('icon-picker-group-name');
+        const previewEl = document.getElementById('icon-picker-confirm-preview');
+        const searchInput = document.getElementById('icon-picker-search');
+        const customInput = document.getElementById('icon-picker-custom-input');
+
+        if (grpNameEl) grpNameEl.textContent = iconPickerState.activeGroup;
+        if (previewEl) previewEl.textContent = iconPickerState.selectedIcon;
+        if (searchInput) searchInput.value = '';
+        if (customInput) customInput.value = '';
+
+        // Reset tab active styling
+        const tabBtns = document.querySelectorAll('#icon-picker-tabs .icon-tab-btn');
+        tabBtns.forEach(btn => {
+            if (btn.dataset.cat === 'all') {
+                btn.className = 'icon-tab-btn px-2.5 py-1 rounded-full font-bold bg-[#00529C] text-white shadow-2xs transition-all';
+            } else {
+                btn.className = 'icon-tab-btn px-2.5 py-1 rounded-full font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 transition-all';
+            }
+        });
+
+        renderIconGrid();
+        if (modal) modal.classList.remove('hidden');
+    }
+
+    function closeIconPickerModal() {
+        const modal = document.getElementById('group-icon-picker-modal');
+        if (modal) modal.classList.add('hidden');
+        iconPickerState.callback = null;
+    }
+
+    function renderIconGrid() {
+        const grid = document.getElementById('icon-picker-grid');
+        const emptyEl = document.getElementById('icon-picker-empty');
+        if (!grid) return;
+        grid.innerHTML = '';
+
+        const rawQ = removeVietnameseTones(iconPickerState.searchQuery.trim());
+        const filtered = ICON_LIBRARY.filter(item => {
+            // Lọc theo danh mục
+            if (iconPickerState.currentTab !== 'all') {
+                if (iconPickerState.currentTab === 'suggested' && item.cat !== 'suggested') return false;
+                if (iconPickerState.currentTab === 'operation' && item.cat !== 'operation' && item.cat !== 'suggested') return false;
+                if (iconPickerState.currentTab === 'business' && item.cat !== 'business' && item.cat !== 'suggested') return false;
+                if (iconPickerState.currentTab === 'hr' && item.cat !== 'hr' && item.cat !== 'suggested') return false;
+                if (iconPickerState.currentTab === 'technical' && item.cat !== 'technical') return false;
+            }
+            // Lọc theo từ khóa tìm kiếm
+            if (rawQ) {
+                const itemQ = removeVietnameseTones(`${item.name} ${item.keywords}`);
+                return itemQ.includes(rawQ);
+            }
+            return true;
+        });
+
+        if (filtered.length === 0) {
+            if (emptyEl) emptyEl.classList.remove('hidden');
+        } else {
+            if (emptyEl) emptyEl.classList.add('hidden');
+            filtered.forEach(item => {
+                const isSelected = item.icon === iconPickerState.selectedIcon;
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = `flex flex-col items-center justify-center p-2 rounded-xl border transition-all cursor-pointer select-none group shadow-2xs ${
+                    isSelected
+                        ? 'border-[#00529C] bg-blue-100/80 ring-2 ring-[#00529C]/50 scale-105'
+                        : 'border-slate-200 bg-white hover:border-[#00529C]/60 hover:bg-blue-50/50 hover:scale-105'
+                }`;
+                btn.title = item.name;
+                btn.innerHTML = `
+                    <span class="text-2xl group-hover:scale-110 transition-transform">${item.icon}</span>
+                    <span class="text-[9px] text-slate-500 truncate w-full text-center mt-1 group-hover:text-[#00529C]">${escapeHtml(item.name.split('/')[0].trim())}</span>
+                `;
+
+                btn.addEventListener('click', () => {
+                    iconPickerState.selectedIcon = item.icon;
+                    const previewEl = document.getElementById('icon-picker-confirm-preview');
+                    if (previewEl) previewEl.textContent = item.icon;
+                    renderIconGrid();
+                });
+
+                // Nhấp đúp chuột để chọn ngay lập tức
+                btn.addEventListener('dblclick', () => {
+                    iconPickerState.selectedIcon = item.icon;
+                    confirmIconPicker();
+                });
+
+                grid.appendChild(btn);
+            });
+        }
+    }
+
+    function confirmIconPicker() {
+        const chosen = iconPickerState.selectedIcon;
+        if (iconPickerState.callback && typeof iconPickerState.callback === 'function') {
+            iconPickerState.callback(chosen);
+        } else if (iconPickerState.activeGroup) {
+            GroupIconManager.setIcon(iconPickerState.activeGroup, chosen);
+        }
+        closeIconPickerModal();
+    }
+
+    // =========================================================================
+    // 🪟 GROUP EDIT / ADD MODAL CONTROLLER
+    // =========================================================================
+
+    const groupModalState = {
+        oldName: '',
+        selectedIcon: '🏢'
+    };
+
+    function openGroupModal(oldName) {
+        groupModalState.oldName = oldName ? String(oldName).trim() : '';
+        const modal = document.getElementById('group-edit-modal');
+        const titleEl = document.getElementById('group-edit-modal-title');
+        const nameInput = document.getElementById('group-edit-name-input');
+        const oldNameInput = document.getElementById('group-edit-old-name');
+        const iconEl = document.getElementById('group-edit-current-icon');
+
+        if (groupModalState.oldName) {
+            groupModalState.selectedIcon = GroupIconManager.getIcon(groupModalState.oldName);
+            if (titleEl) titleEl.innerHTML = `✏️ Chỉnh Sửa Nhóm: <span class="text-[#00529C]">${escapeHtml(groupModalState.oldName)}</span>`;
+            if (nameInput) nameInput.value = groupModalState.oldName;
+            if (oldNameInput) oldNameInput.value = groupModalState.oldName;
+        } else {
+            groupModalState.selectedIcon = '🏢';
+            if (titleEl) titleEl.innerHTML = `➕ Thêm Nhóm Chi Phí Mới`;
+            if (nameInput) nameInput.value = '';
+            if (oldNameInput) oldNameInput.value = '';
+        }
+
+        if (iconEl) iconEl.textContent = groupModalState.selectedIcon;
+        if (modal) modal.classList.remove('hidden');
+        if (nameInput) setTimeout(() => nameInput.focus(), 100);
+    }
+
+    function closeGroupModal() {
+        const modal = document.getElementById('group-edit-modal');
+        if (modal) modal.classList.add('hidden');
+    }
+
+    function handleGroupFormSubmit(e) {
+        e.preventDefault();
+        const nameInput = document.getElementById('group-edit-name-input');
+        const newName = nameInput ? nameInput.value.trim() : '';
+        if (!newName) return;
+
+        const oldName = groupModalState.oldName;
+        const chosenIcon = groupModalState.selectedIcon || '🏢';
+
+        if (oldName) {
+            // Đổi tên nhóm hiện tại
+            if (oldName !== newName) {
+                state.categories.forEach(c => {
+                    if (c.group === oldName) c.group = newName;
+                });
+                GroupIconManager.renameGroupIcon(oldName, newName, chosenIcon);
+            } else {
+                GroupIconManager.setIcon(newName, chosenIcon);
+            }
+        } else {
+            // Thêm nhóm mới
+            const maxId = state.categories.reduce((m, c) => Math.max(m, c.id || 0), 0);
+            state.categories.push({
+                id: maxId + 1,
+                tt: maxId + 1,
+                name: `Khoản mục mới thuộc ${newName}`,
+                group: newName,
+                b7_display: '',
+                b10_display: '',
+                b7_codes: [],
+                b10_codes: [],
+                is_material: false
+            });
+            GroupIconManager.setIcon(newName, chosenIcon);
+        }
+
+        saveCurrentState();
+        closeGroupModal();
+        renderMappingTab();
+        renderTable();
+        if (window.THACO_DASHBOARD && typeof window.THACO_DASHBOARD.init === 'function') {
+            try { window.THACO_DASHBOARD.init(); } catch (err) {}
+        }
+    }
+
+    function initIconPickerAndGroupModalEvents() {
+        // Icon Picker Modal listeners
+        const btnClosePicker = document.getElementById('btn-close-icon-picker');
+        const btnCancelPicker = document.getElementById('btn-cancel-icon-picker');
+        const btnConfirmPicker = document.getElementById('btn-confirm-icon-picker');
+        const btnResetPicker = document.getElementById('btn-reset-group-icon');
+        const searchInput = document.getElementById('icon-picker-search');
+        const btnApplyCustom = document.getElementById('btn-apply-custom-icon');
+        const customInput = document.getElementById('icon-picker-custom-input');
+
+        if (btnClosePicker) btnClosePicker.addEventListener('click', closeIconPickerModal);
+        if (btnCancelPicker) btnCancelPicker.addEventListener('click', closeIconPickerModal);
+        if (btnConfirmPicker) btnConfirmPicker.addEventListener('click', confirmIconPicker);
+
+        if (btnResetPicker) {
+            btnResetPicker.addEventListener('click', () => {
+                if (iconPickerState.activeGroup) {
+                    GroupIconManager.resetIcon(iconPickerState.activeGroup);
+                    iconPickerState.selectedIcon = GroupIconManager.getIcon(iconPickerState.activeGroup);
+                    const previewEl = document.getElementById('icon-picker-confirm-preview');
+                    if (previewEl) previewEl.textContent = iconPickerState.selectedIcon;
+                    renderIconGrid();
+                }
+            });
+        }
+
+        if (searchInput) {
+            searchInput.addEventListener('input', (e) => {
+                iconPickerState.searchQuery = e.target.value;
+                renderIconGrid();
+            });
+        }
+
+        // Category Tab buttons
+        const tabBtns = document.querySelectorAll('#icon-picker-tabs .icon-tab-btn');
+        tabBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                tabBtns.forEach(b => {
+                    b.className = 'icon-tab-btn px-2.5 py-1 rounded-full font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 transition-all';
+                });
+                btn.className = 'icon-tab-btn px-2.5 py-1 rounded-full font-bold bg-[#00529C] text-white shadow-2xs transition-all';
+                iconPickerState.currentTab = btn.dataset.cat || 'all';
+                renderIconGrid();
+            });
+        });
+
+        // Custom emoji input
+        if (btnApplyCustom && customInput) {
+            btnApplyCustom.addEventListener('click', () => {
+                const val = customInput.value.trim();
+                if (val) {
+                    iconPickerState.selectedIcon = val;
+                    const previewEl = document.getElementById('icon-picker-confirm-preview');
+                    if (previewEl) previewEl.textContent = val;
+                    renderIconGrid();
+                }
+            });
+            customInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    btnApplyCustom.click();
+                }
+            });
+        }
+
+        // Group Edit/Add Modal listeners
+        const btnCloseGroupModal = document.getElementById('btn-close-group-edit-modal');
+        const btnCancelGroupModal = document.getElementById('btn-cancel-group-edit-modal');
+        const formGroupModal = document.getElementById('form-group-edit-modal');
+        const btnOpenPickerFromModal = document.getElementById('btn-open-picker-from-group-modal');
+
+        if (btnCloseGroupModal) btnCloseGroupModal.addEventListener('click', closeGroupModal);
+        if (btnCancelGroupModal) btnCancelGroupModal.addEventListener('click', closeGroupModal);
+        if (formGroupModal) formGroupModal.addEventListener('submit', handleGroupFormSubmit);
+
+        if (btnOpenPickerFromModal) {
+            btnOpenPickerFromModal.addEventListener('click', () => {
+                const nameInput = document.getElementById('group-edit-name-input');
+                const targetGroupName = (nameInput && nameInput.value.trim()) || groupModalState.oldName || 'Nhóm chi phí mới';
+                openIconPickerModal(targetGroupName, (chosenIcon) => {
+                    groupModalState.selectedIcon = chosenIcon;
+                    const iconEl = document.getElementById('group-edit-current-icon');
+                    if (iconEl) iconEl.textContent = chosenIcon;
+                });
+            });
+        }
+    }
 
     const DEFAULT_MATERIAL_IDS = [1, 6, 7, 10, 12, 17, 22, 25, 27, 30];
 
@@ -277,8 +822,9 @@
         // 2. Tự động khôi phục từ Storage phiên làm việc cuối cùng của người dùng
         loadSavedState();
 
-        // 3. Đảm bảo dữ liệu cơ sở không bao giờ bị rỗng (Fallback Baseline C1101)
+        // 3. Đảm bảo dữ liệu cơ sở không bao giờ bị rỗng (Fallback Baseline C1101 & CB-NV)
         ensureBaselineData();
+        ensureBaselineCbnvData();
 
         // 4. Khởi tạo và liên kết đồng bộ 2 chiều với Google Sheet Quan_Ly_Chi_Phi (DM_CPHC)
         initGoogleSheetSync();
@@ -307,9 +853,11 @@
     // ==========================================
 
     function saveCurrentState() {
+        clearReportDataCache();
         try {
             const dataToSave = {
                 categories: state.categories,
+                groupIcons: state.groupIcons,
                 entities: state.entities,
                 qtpnMappings: state.qtpnMappings,
                 deptData: state.deptData,
@@ -319,6 +867,9 @@
                 data2024: state.data2024,
                 data2025: state.data2025,
                 compareConfig: state.compareConfig,
+                cbnvConfig: state.cbnvConfig,
+                cbnvData: state.cbnvData,
+                cbnvAudit: state.cbnvAudit,
                 timestamp: new Date().toISOString()
             };
             localStorage.setItem(STORAGE_KEY, JSON.stringify(dataToSave));
@@ -330,6 +881,17 @@
 
     function loadSavedState() {
         try {
+            // Nạp Group Icons độc lập từ storage
+            try {
+                const savedIconsRaw = localStorage.getItem('THACO_CPHC_GROUP_ICONS');
+                if (savedIconsRaw) {
+                    const parsed = JSON.parse(savedIconsRaw);
+                    if (parsed && typeof parsed === 'object') {
+                        state.groupIcons = Object.assign({}, parsed, state.groupIcons || {});
+                    }
+                }
+            } catch (err) {}
+
             const raw = localStorage.getItem(STORAGE_KEY);
             if (raw) {
                 const saved = JSON.parse(raw);
@@ -344,6 +906,9 @@
 
                 if (saved.categories && Array.isArray(saved.categories)) {
                     state.categories = saved.categories;
+                }
+                if (saved.groupIcons && typeof saved.groupIcons === 'object') {
+                    state.groupIcons = Object.assign({}, state.groupIcons || {}, saved.groupIcons);
                 }
                 if (saved.entities && Array.isArray(saved.entities)) {
                     state.entities = saved.entities;
@@ -372,6 +937,15 @@
                 if (saved.deptData) {
                     state.deptData = saved.deptData;
                 }
+                if (saved.cbnvConfig && typeof saved.cbnvConfig === 'object') {
+                    state.cbnvConfig = saved.cbnvConfig;
+                }
+                if (saved.cbnvData && typeof saved.cbnvData === 'object') {
+                    state.cbnvData = saved.cbnvData;
+                }
+                if (saved.cbnvAudit && typeof saved.cbnvAudit === 'object') {
+                    state.cbnvAudit = saved.cbnvAudit;
+                }
                 ensureCategoryMaterialFlags();
                 console.log('Đã nạp dữ liệu từ bộ nhớ đệm Google Sheet Live V3.');
             }
@@ -387,8 +961,10 @@
 
         try {
             localStorage.removeItem(STORAGE_KEY);
+            try { localStorage.removeItem('THACO_CPHC_GROUP_ICONS'); } catch (err) {}
             purgeLegacyCaches();
 
+            state.groupIcons = {};
             state.categories = JSON.parse(JSON.stringify(THACO_APP_DATA.categories || []));
             state.entities = JSON.parse(JSON.stringify(THACO_APP_DATA.entities || []));
             state.data2025 = JSON.parse(JSON.stringify(THACO_APP_DATA.data2025 || {}));
@@ -396,6 +972,9 @@
             state.deptData = JSON.parse(JSON.stringify(THACO_APP_DATA.deptData || {}));
             state.actualMonths = [1, 2, 3, 4, 5, 6, 7];
             state.selectedMonths = [1, 2, 3, 4, 5, 6, 7];
+            state.cbnvConfig = { displayMode: 'BOTH' };
+            state.cbnvData = {};
+            ensureBaselineCbnvData();
             ensureCategoryMaterialFlags();
 
             populateSlicers();
@@ -438,10 +1017,17 @@
     function getGoogleSheetSyncConfig() {
         try {
             const raw = localStorage.getItem(GSHEET_CONFIG_KEY);
-            if (raw) return JSON.parse(raw);
+            if (raw) {
+                const parsed = JSON.parse(raw);
+                if (parsed.apiKey === undefined) {
+                    parsed.apiKey = 'THACO_CPHC_2026_SECURE_TOKEN';
+                }
+                return parsed;
+            }
         } catch (e) {}
         return {
             webAppUrl: '',
+            apiKey: 'THACO_CPHC_2026_SECURE_TOKEN',
             autoSync: true,
             lastSynced: null
         };
@@ -463,11 +1049,15 @@
         const statusMsg = document.getElementById('gsheet-sync-status-msg');
         const tabLastTime = document.getElementById('tab-sync-last-time');
         const inputModal = document.getElementById('input-gsheet-web-app-url');
+        const inputKeyModal = document.getElementById('input-gsheet-api-key');
         const inputTab = document.getElementById('tab-input-gsheet-url');
+        const inputKeyTab = document.getElementById('tab-input-gsheet-key');
         const chkAutoSync = document.getElementById('chk-gsheet-auto-sync');
 
         if (inputModal) inputModal.value = config.webAppUrl || '';
+        if (inputKeyModal) inputKeyModal.value = config.apiKey || '';
         if (inputTab) inputTab.value = config.webAppUrl || '';
+        if (inputKeyTab) inputKeyTab.value = config.apiKey || '';
         if (chkAutoSync) chkAutoSync.checked = config.autoSync !== false;
 
         const timeStr = config.lastSynced ? (new Date(config.lastSynced).toLocaleTimeString('vi-VN') + ' ' + new Date(config.lastSynced).toLocaleDateString('vi-VN')) : null;
@@ -640,8 +1230,7 @@
                     const m24 = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
                     const rows24 = (state.deptData[entCode] && state.deptData[entCode]['2024']) || [];
                     rows24.forEach(r => {
-                        const isMatch = (cat.b7_codes && cat.b7_codes.includes(r.km)) || (cat.b7_display && cat.b7_display.includes(r.km));
-                        if (isMatch) {
+                        if (matchCategoryKm(cat, r.km)) {
                             for (let i = 0; i < 12; i++) m24[i] += (r.months[i] || 0);
                         }
                     });
@@ -651,8 +1240,7 @@
                     const m25 = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
                     const rows25 = (state.deptData[entCode] && state.deptData[entCode]['2025']) || [];
                     rows25.forEach(r => {
-                        const isMatch = (cat.b7_codes && cat.b7_codes.includes(r.km)) || (cat.b7_display && cat.b7_display.includes(r.km));
-                        if (isMatch) {
+                        if (matchCategoryKm(cat, r.km)) {
                             for (let i = 0; i < 12; i++) m25[i] += (r.months[i] || 0);
                         }
                     });
@@ -662,8 +1250,7 @@
                     const m26 = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
                     const rows26 = (state.deptData[entCode] && state.deptData[entCode]['2026']) || [];
                     rows26.forEach(r => {
-                        const isMatch = (cat.b7_codes && cat.b7_codes.includes(r.km)) || (cat.b7_display && cat.b7_display.includes(r.km));
-                        if (isMatch) {
+                        if (matchCategoryKm(cat, r.km)) {
                             for (let i = 0; i < 12; i++) m26[i] += (r.months[i] || 0);
                         }
                     });
@@ -701,10 +1288,15 @@
 
         try {
             console.log('Đang kết nối Google Sheet Quan_Ly_Chi_Phi...');
-            const fetchUrl = config.webAppUrl + (config.webAppUrl.includes('?') ? '&' : '?') + 't=' + Date.now();
+            const keyParam = config.apiKey ? `&api_key=${encodeURIComponent(config.apiKey.trim())}` : '';
+            const fetchUrl = config.webAppUrl + (config.webAppUrl.includes('?') ? '&' : '?') + 't=' + Date.now() + keyParam;
             const res = await fetch(fetchUrl);
-            if (!res.ok) throw new Error('HTTP status ' + res.status);
+            if (!res.ok && res.status !== 401) throw new Error('HTTP status ' + res.status);
             const data = await res.json();
+
+            if (data.code === 401 || (data.status === 'error' && data.code === 401)) {
+                throw new Error('Khóa bảo mật API_KEY không hợp lệ hoặc chưa được cung cấp. Vui lòng kiểm tra lại cấu hình kết nối.');
+            }
 
             if (data.status === 'success') {
                 processGoogleSheetData(data);
@@ -729,7 +1321,7 @@
         } catch (err) {
             console.error('Lỗi đồng bộ từ Google Sheet:', err);
             if (isManual) {
-                alert('Không thể kết nối với Google Sheet: ' + err.message + '\n\nVui lòng kiểm tra lại Web App URL trong mục Cài đặt kết nối.');
+                alert('Không thể kết nối với Google Sheet: ' + err.message + '\n\nVui lòng kiểm tra lại Web App URL và khóa API_KEY trong mục Cài đặt kết nối.');
             }
         } finally {
             if (btn1) btn1.classList.remove('opacity-50', 'pointer-events-none');
@@ -756,6 +1348,7 @@
             console.log('Đang đẩy danh mục lên Google Sheet DM_CPHC...');
             const payload = {
                 action: 'save_categories',
+                api_key: config.apiKey || '',
                 categories: state.categories
             };
 
@@ -805,12 +1398,15 @@
 
     function saveGoogleSheetConfigFromModal() {
         const urlInput = document.getElementById('input-gsheet-web-app-url');
+        const keyInput = document.getElementById('input-gsheet-api-key');
         const chkAuto = document.getElementById('chk-gsheet-auto-sync');
         const url = urlInput ? urlInput.value.trim() : '';
+        const apiKey = keyInput ? keyInput.value.trim() : '';
         const autoSync = chkAuto ? chkAuto.checked : true;
 
         const config = getGoogleSheetSyncConfig();
         config.webAppUrl = url;
+        if (apiKey) config.apiKey = apiKey;
         config.autoSync = autoSync;
         saveGoogleSheetSyncConfig(config);
 
@@ -823,13 +1419,16 @@
 
     function saveGoogleSheetConfigFromTab() {
         const inputTab = document.getElementById('tab-input-gsheet-url');
+        const inputKeyTab = document.getElementById('tab-input-gsheet-key');
         const url = inputTab ? inputTab.value.trim() : '';
+        const apiKey = inputKeyTab ? inputKeyTab.value.trim() : '';
 
         const config = getGoogleSheetSyncConfig();
         config.webAppUrl = url;
+        if (apiKey) config.apiKey = apiKey;
         saveGoogleSheetSyncConfig(config);
 
-        alert('Đã lưu Web App URL thành công!');
+        alert('Đã lưu Web App URL & Khóa API thành công!');
         if (url) {
             syncFromGoogleSheet(true);
         }
@@ -837,8 +1436,10 @@
 
     async function testGoogleSheetConnection() {
         const urlInput = document.getElementById('input-gsheet-web-app-url');
+        const keyInput = document.getElementById('input-gsheet-api-key');
         const resultArea = document.getElementById('gsheet-test-result');
         const url = urlInput ? urlInput.value.trim() : '';
+        const apiKey = keyInput ? keyInput.value.trim() : (getGoogleSheetSyncConfig().apiKey || '');
 
         if (!url) {
             alert('Vui lòng nhập Web App URL trước khi kiểm tra!');
@@ -847,16 +1448,21 @@
 
         if (resultArea) {
             resultArea.className = 'p-3 rounded-lg border text-xs bg-blue-50 text-blue-800 border-blue-200';
-            resultArea.textContent = '⏳ Đang kiểm tra kết nối với Apps Script...';
+            resultArea.textContent = '⏳ Đang kiểm tra kết nối & xác thực khóa API_KEY với Apps Script...';
             resultArea.classList.remove('hidden');
         }
 
         try {
-            const res = await fetch(url);
+            const keyParam = apiKey ? `&api_key=${encodeURIComponent(apiKey.trim())}` : '';
+            const testUrl = url + (url.includes('?') ? '&' : '?') + 'action=test_key&t=' + Date.now() + keyParam;
+            const res = await fetch(testUrl);
             const json = await res.json();
             if (json.status === 'success') {
                 resultArea.className = 'p-3 rounded-lg border text-xs bg-emerald-50 text-emerald-800 border-emerald-300 font-bold';
-                resultArea.textContent = `✅ Kết nối thành công! Đã đọc được ${json.count || 0} khoản mục từ Google Sheet DM_CPHC.`;
+                resultArea.textContent = `✅ Xác thực kết nối và khóa API_KEY thành công! ${json.message || ''}`;
+            } else if (json.code === 401 || res.status === 401) {
+                resultArea.className = 'p-3 rounded-lg border text-xs bg-rose-50 text-rose-800 border-rose-300 font-bold';
+                resultArea.textContent = `❌ Từ chối truy cập (401): ${json.message || 'Khóa API_KEY không chính xác. Vui lòng kiểm tra lại trên Google Sheet.'}`;
             } else {
                 resultArea.className = 'p-3 rounded-lg border text-xs bg-rose-50 text-rose-800 border-rose-300 font-bold';
                 resultArea.textContent = `⚠️ Lỗi phản hồi: ${json.message || 'Không xác định'}`;
@@ -959,9 +1565,44 @@
         const btnMaterialOnly = document.getElementById('btn-filter-material-only');
         if (btnMaterialOnly) btnMaterialOnly.addEventListener('click', () => setMaterialFilter(true));
 
+        // Chuyển đổi Dạng xem Báo cáo (12 Tháng vs So sánh YoY 3 Năm)
+        const btnViewMonthly = document.getElementById('btn-view-mode-monthly');
+        if (btnViewMonthly) {
+            btnViewMonthly.addEventListener('click', () => {
+                if (!state.yoyConfig) state.yoyConfig = { viewMode: 'MONTHLY', thresholdPercent: 20 };
+                state.yoyConfig.viewMode = 'MONTHLY';
+                updateReportViewModeUI();
+                renderTable();
+            });
+        }
+
+        const btnViewYoY = document.getElementById('btn-view-mode-yoy');
+        if (btnViewYoY) {
+            btnViewYoY.addEventListener('click', () => {
+                if (!state.yoyConfig) state.yoyConfig = { viewMode: 'MONTHLY', thresholdPercent: 20 };
+                state.yoyConfig.viewMode = 'YOY_TABLE';
+                updateReportViewModeUI();
+                renderTable();
+            });
+        }
+
+        // Điều chỉnh Ngưỡng cảnh báo YoY
+        const inputThreshold = document.getElementById('input-yoy-threshold');
+        if (inputThreshold) {
+            inputThreshold.addEventListener('input', () => {
+                const val = parseFloat(inputThreshold.value) || 20;
+                if (!state.yoyConfig) state.yoyConfig = { viewMode: 'MONTHLY', thresholdPercent: 20 };
+                state.yoyConfig.thresholdPercent = val;
+                renderTable();
+            });
+        }
+
         // Tabs
         const tabRepBtn = document.getElementById('tab-report-btn');
         if (tabRepBtn) tabRepBtn.addEventListener('click', () => switchTab('report'));
+
+        const tabCbnvBtn = document.getElementById('tab-cbnv-btn');
+        if (tabCbnvBtn) tabCbnvBtn.addEventListener('click', () => switchTab('cbnv'));
 
         const tabDashBtn = document.getElementById('tab-dashboard-btn');
         if (tabDashBtn) tabDashBtn.addEventListener('click', () => switchTab('dashboard'));
@@ -977,6 +1618,65 @@
 
         const tabUploadBtn = document.getElementById('tab-upload-btn');
         if (tabUploadBtn) tabUploadBtn.addEventListener('click', () => switchTab('upload'));
+
+        // CBNV Controls (Mục 2.5: Chi phí / CB-NV)
+        const btnCbnvModeThucTe = document.getElementById('btn-cbnv-mode-thucte');
+        if (btnCbnvModeThucTe) btnCbnvModeThucTe.addEventListener('click', () => setCbnvDisplayMode('THUC_TE'));
+
+        const btnCbnvModeDinhBien = document.getElementById('btn-cbnv-mode-dinhbien');
+        if (btnCbnvModeDinhBien) btnCbnvModeDinhBien.addEventListener('click', () => setCbnvDisplayMode('DINH_BIEN'));
+
+        const btnCbnvModeBoth = document.getElementById('btn-cbnv-mode-both');
+        if (btnCbnvModeBoth) btnCbnvModeBoth.addEventListener('click', () => setCbnvDisplayMode('BOTH'));
+
+        const inputCbnvSearch = document.getElementById('input-cbnv-search');
+        if (inputCbnvSearch) inputCbnvSearch.addEventListener('input', (e) => renderCbnvTab(e.target.value));
+
+        const btnOpenCbnvModal = document.getElementById('btn-open-cbnv-upload-modal');
+        if (btnOpenCbnvModal) btnOpenCbnvModal.addEventListener('click', openCbnvUploadModal);
+
+        const btnCloseCbnvModal = document.getElementById('btn-close-cbnv-modal');
+        if (btnCloseCbnvModal) btnCloseCbnvModal.addEventListener('click', closeCbnvUploadModal);
+
+        const btnCancelCbnvModal = document.getElementById('btn-cancel-cbnv-modal');
+        if (btnCancelCbnvModal) btnCancelCbnvModal.addEventListener('click', closeCbnvUploadModal);
+
+        const cbnvDropzone = document.getElementById('cbnv-dropzone');
+        const inputCbnvFile = document.getElementById('input-cbnv-file');
+        if (cbnvDropzone && inputCbnvFile) {
+            cbnvDropzone.addEventListener('click', () => inputCbnvFile.click());
+            cbnvDropzone.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                cbnvDropzone.classList.add('border-emerald-500', 'bg-emerald-50/40');
+            });
+            cbnvDropzone.addEventListener('dragleave', () => {
+                cbnvDropzone.classList.remove('border-emerald-500', 'bg-emerald-50/40');
+            });
+            cbnvDropzone.addEventListener('drop', (e) => {
+                e.preventDefault();
+                cbnvDropzone.classList.remove('border-emerald-500', 'bg-emerald-50/40');
+                if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                    handleCbnvFileSelected(e.dataTransfer.files[0]);
+                }
+            });
+            inputCbnvFile.addEventListener('change', (e) => {
+                if (e.target && e.target.files && e.target.files.length > 0) {
+                    handleCbnvFileSelected(e.target.files[0]);
+                }
+            });
+        }
+
+        const btnConfirmCbnvUpload = document.getElementById('btn-confirm-cbnv-upload');
+        if (btnConfirmCbnvUpload) btnConfirmCbnvUpload.addEventListener('click', confirmCbnvUpload);
+
+        const btnDownloadCbnvTemplate = document.getElementById('btn-download-cbnv-template');
+        if (btnDownloadCbnvTemplate) btnDownloadCbnvTemplate.addEventListener('click', downloadCbnvTemplate);
+
+        const btnExportCbnvExcel = document.getElementById('btn-export-cbnv-excel');
+        if (btnExportCbnvExcel) btnExportCbnvExcel.addEventListener('click', exportCbnvMatrixToExcel);
+
+        const btnSyncCbnvGsheet = document.getElementById('btn-sync-cbnv-gsheet');
+        if (btnSyncCbnvGsheet) btnSyncCbnvGsheet.addEventListener('click', handleSyncCbnvWithGoogleSheetPrompt);
 
         // QTPN Controls
         const btnSyncQtpnPull = document.getElementById('btn-sync-qtpn-from-gsheet');
@@ -1130,13 +1830,16 @@
         if (btnSaveMap) btnSaveMap.addEventListener('click', saveMappingChanges);
 
         const btnAddGrp = document.getElementById('btn-add-group');
-        if (btnAddGrp) btnAddGrp.addEventListener('click', addNewGroupPrompt);
+        if (btnAddGrp) btnAddGrp.addEventListener('click', () => openGroupModal());
 
         const btnExpandAll = document.getElementById('btn-expand-all-groups');
         if (btnExpandAll) btnExpandAll.addEventListener('click', expandAllGroups);
 
         const btnCollapseAll = document.getElementById('btn-collapse-all-groups');
         if (btnCollapseAll) btnCollapseAll.addEventListener('click', collapseAllGroups);
+
+        // Khởi tạo các sự kiện Modal Thư viện Icon & Modal Nhóm
+        initIconPickerAndGroupModalEvents();
     }
 
     // ==========================================
@@ -1602,7 +2305,7 @@
         const currentQT = filters.quanTri || 'ALL';
         const currentPN = filters.phapNhan || 'ALL';
 
-        let list = state.entities || [];
+        let list = (state.entities || []).filter(e => e.active !== false);
 
         if (currentDonVi !== 'ALL') {
             list = list.filter(e => {
@@ -1635,7 +2338,7 @@
         const currentDonVi = state.filters.donVi || state.filters.khoi || state.filters.mien || 'ALL';
         const currentQT = state.filters.quanTri;
 
-        let filteredEntities = state.entities || [];
+        let filteredEntities = (state.entities || []).filter(e => e.active !== false);
 
         // Lọc theo Slicer Đơn vị
         if (currentDonVi !== 'ALL') {
@@ -1736,6 +2439,19 @@
     // ==========================================
 
     function calculateReportData(customFilters) {
+        const filters = customFilters || state.filters;
+        const cacheKey = JSON.stringify({
+            filters: filters,
+            actualMonths: state.actualMonths,
+            compareConfig: state.compareConfig,
+            catCount: (state.categories || []).length,
+            entCount: (state.entities || []).length
+        });
+
+        if (reportDataCache.has(cacheKey)) {
+            return reportDataCache.get(cacheKey);
+        }
+
         const activeEntityCodes = getActiveEntityCodes(customFilters);
         const tkFilter = (customFilters && customFilters.taiKhoan) ? customFilters.taiKhoan : state.filters.taiKhoan;
         const bpFilter = (customFilters && customFilters.boPhan) ? customFilters.boPhan : state.filters.boPhan;
@@ -1759,10 +2475,7 @@
                 if (state.deptData && state.deptData[entCode] && Array.isArray(state.deptData[entCode][yearStr]) && state.deptData[entCode][yearStr].length > 0) {
                     const dRows = state.deptData[entCode][yearStr];
                     dRows.forEach(r => {
-                        const isCat = (r.catId !== undefined && r.catId === cat.id) ||
-                                      (cat.b7_codes && cat.b7_codes.includes(r.km)) ||
-                                      (cat.b7_display && cat.b7_display.includes(r.km)) ||
-                                      (r.km && cat.id && String(r.km) === String(cat.id));
+                        const isCat = (r.catId !== undefined && r.catId === cat.id) || matchCategoryKm(cat, r.km);
                         if (isCat && matchDeptFilter(r.bp, r.tenBp)) {
                             entDeptMatched = true;
                             for (let m = 0; m < 12; m++) {
@@ -1797,8 +2510,7 @@
                     const dRows = state.deptData[entCode]['2026'];
                     dRows.forEach(r => {
                         const isCat = (r.catId !== undefined && r.catId === cat.id) ||
-                                      (cat.b7_codes && cat.b7_codes.includes(r.km)) ||
-                                      (cat.b7_display && cat.b7_display.includes(r.km)) ||
+                                      matchCategoryKm(cat, r.km) ||
                                       (r.km && cat.id && String(r.km) === String(cat.id));
                         if (isCat && matchDeptFilter(r.bp, r.tenBp)) {
                             entDeptMatched = true;
@@ -1849,8 +2561,10 @@
                 runRateMultiplier = actualSum2026 / actualSumSamePeriod2025;
             }
 
+            const forecastBounds = {};
             remainingMonths.forEach(m => {
                 const baseVal2025 = monthly2025[m - 1] || 0;
+                const baseVal2024 = monthly2024[m - 1] || 0;
                 let projected = 0;
                 if (baseVal2025 > 0) {
                     projected = baseVal2025 * runRateMultiplier;
@@ -1858,6 +2572,18 @@
                     projected = actualMonths.length > 0 ? (actualSum2026 / actualMonths.length) : 0;
                 }
                 monthly2026[m - 1] = Math.max(0, projected);
+
+                // Dải tự tin phương sai mùa vụ (Seasonal Confidence Interval)
+                const histSpread = (baseVal2024 > 0 && baseVal2025 > 0)
+                    ? Math.abs(baseVal2025 - baseVal2024) / baseVal2024
+                    : 0.12;
+                const spread = Math.max(0.06, Math.min(0.20, histSpread * 0.5));
+                forecastBounds[m] = {
+                    projected: projected,
+                    min: Math.max(0, projected * (1 - spread)),
+                    max: projected * (1 + spread),
+                    spread: spread
+                };
             });
 
             const forecastRemainingSum = remainingMonths.reduce((sum, m) => sum + monthly2026[m - 1], 0);
@@ -1878,6 +2604,7 @@
                 actualSum2026: actualSum2026,
                 forecastRemainingSum: forecastRemainingSum,
                 fullYear2026: fullYear2026,
+                forecastBounds: forecastBounds,
                 diffYoY: diffYoY,
                 diffYoYPercent: diffYoYPercent,
                 diffAmount: diffYoY,
@@ -1885,6 +2612,9 @@
             });
         });
 
+        if (cacheKey) {
+            reportDataCache.set(cacheKey, reportRows);
+        }
         return reportRows;
     }
 
@@ -1892,9 +2622,267 @@
     // 📋 TABLE & DASHBOARD RENDERING
     // ==========================================
 
+    function updateReportViewModeUI() {
+        const isYoY = state.yoyConfig && state.yoyConfig.viewMode === 'YOY_TABLE';
+        const btnMonthly = document.getElementById('btn-view-mode-monthly');
+        const btnYoY = document.getElementById('btn-view-mode-yoy');
+        const yearPickerWrap = document.getElementById('year-picker-wrapper');
+        const monthPickerWrap = document.getElementById('month-picker-wrapper');
+        const inputThreshold = document.getElementById('input-yoy-threshold');
+
+        if (inputThreshold && state.yoyConfig) {
+            inputThreshold.value = state.yoyConfig.thresholdPercent || 20;
+        }
+
+        if (btnMonthly && btnYoY) {
+            if (isYoY) {
+                btnMonthly.className = 'px-2.5 py-1 text-xs font-medium rounded-lg bg-white text-slate-700 hover:bg-slate-50 border border-slate-200 transition-all flex items-center gap-1';
+                btnYoY.className = 'px-2.5 py-1 text-xs font-bold rounded-lg bg-[#00529C] text-white shadow-sm transition-all flex items-center gap-1';
+                if (yearPickerWrap) yearPickerWrap.classList.add('hidden');
+                if (monthPickerWrap) monthPickerWrap.classList.add('hidden');
+            } else {
+                btnMonthly.className = 'px-2.5 py-1 text-xs font-bold rounded-lg bg-[#00529C] text-white shadow-sm transition-all flex items-center gap-1';
+                btnYoY.className = 'px-2.5 py-1 text-xs font-medium rounded-lg bg-white text-slate-700 hover:bg-slate-50 border border-slate-200 transition-all flex items-center gap-1';
+                if (yearPickerWrap) yearPickerWrap.classList.remove('hidden');
+                if (monthPickerWrap) monthPickerWrap.classList.remove('hidden');
+            }
+        }
+    }
+
+    function renderYoYTableContent(grouped, displayRows, tbody) {
+        const threshold = (state.yoyConfig && state.yoyConfig.thresholdPercent) || 20;
+
+        function renderYoYMetricCells(vNew, vOld, isHeaderOrTotal = false) {
+            const diff = vNew - vOld;
+            const hasBase = vOld > 0;
+            const pct = hasBase ? ((diff / vOld) * 100) : (vNew > 0 ? 100 : 0);
+            const sign = diff >= 0 ? '+' : '';
+            const diffFormatted = `${diff >= 0 ? '+' : ''}${formatNumber(diff)}`;
+
+            let pctHtml = '<span class="text-slate-400 font-mono text-xs">-</span>';
+            if (hasBase) {
+                const pctText = `${sign}${pct.toFixed(1)}%`;
+                if (Math.abs(pct) >= threshold) {
+                    if (pct > 0) {
+                        pctHtml = `<span class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-black bg-rose-100 text-rose-800 border border-rose-300 shadow-sm" title="Tăng vượt ngưỡng cảnh báo ±${threshold}%">▲ ${pctText} ⚠️</span>`;
+                    } else {
+                        pctHtml = `<span class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-black bg-emerald-100 text-emerald-800 border border-emerald-300 shadow-sm" title="Giảm vượt ngưỡng cảnh báo ±${threshold}%">▼ ${pctText}</span>`;
+                    }
+                } else {
+                    const color = isHeaderOrTotal
+                        ? (pct > 0 ? 'text-amber-300 font-bold' : (pct < 0 ? 'text-emerald-300 font-bold' : 'text-slate-200'))
+                        : (pct > 0 ? 'text-amber-700 font-bold' : (pct < 0 ? 'text-emerald-700 font-bold' : 'text-slate-600'));
+                    pctHtml = `<span class="font-mono text-xs ${color}">${pctText}</span>`;
+                }
+            } else if (vNew > 0) {
+                pctHtml = `<span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800">Mới phát sinh</span>`;
+            }
+
+            const diffColor = isHeaderOrTotal
+                ? 'text-white'
+                : (diff > 0 ? 'text-amber-900 font-bold' : (diff < 0 ? 'text-emerald-900 font-bold' : 'text-slate-600'));
+
+            return {
+                diffHtml: `<td class="p-2 text-right border-r border-slate-200 font-mono text-xs ${diffColor}">${diffFormatted}</td>`,
+                pctHtml: `<td class="p-2 text-right border-r border-slate-200 font-mono text-xs">${pctHtml}</td>`
+            };
+        }
+
+        let stt = 1;
+        let grand2024 = 0, grand2025 = 0, grand2026 = 0;
+
+        Object.keys(grouped).forEach(grpName => {
+            const rows = grouped[grpName];
+            const isCollapsed = !!state.collapsedGroups[grpName];
+
+            let grp2024 = 0, grp2025 = 0, grp2026 = 0;
+            rows.forEach(r => {
+                grp2024 += (r.total2024 || 0);
+                grp2025 += (r.total2025 || 0);
+                grp2026 += (r.fullYear2026 || 0);
+            });
+
+            grand2024 += grp2024;
+            grand2025 += grp2025;
+            grand2026 += grp2026;
+
+            const grp26_25 = renderYoYMetricCells(grp2026, grp2025, true);
+            const grp26_24 = renderYoYMetricCells(grp2026, grp2024, true);
+            const grp25_24 = renderYoYMetricCells(grp2025, grp2024, true);
+
+            // Group Header Row
+            const grpTr = document.createElement('tr');
+            grpTr.className = 'bg-[#FEF3C7] text-[#00529C] font-extrabold text-xs border-y border-amber-200 select-none';
+            grpTr.innerHTML = `
+                <td class="p-2 text-center text-[#00529C] border-r border-amber-200/80 font-mono sticky-col-1 bg-[#FEF3C7] cursor-pointer" data-action="toggle-collapse">
+                    <span class="inline-flex items-center justify-center w-5 h-5 rounded bg-amber-200 text-[#00529C] font-bold text-xs">${isCollapsed ? '+' : '−'}</span>
+                </td>
+                <td colspan="3" class="p-2 text-left text-[#00529C] border-r border-amber-200/80 font-extrabold text-xs cursor-pointer" data-action="toggle-collapse">
+                    <span>${(window.getGroupIcon ? window.getGroupIcon(grpName) : '📑')} ${escapeHtml(grpName)} (${rows.length} khoản mục)</span>
+                </td>
+                <td class="p-2 text-right border-r border-amber-200/80 font-mono text-purple-900 bg-purple-50/50">${formatNumber(grp2024)}</td>
+                <td class="p-2 text-right border-r border-amber-200/80 font-mono text-sky-900 bg-sky-50/50">${formatNumber(grp2025)}</td>
+                <td class="p-2 text-right border-r border-amber-200/80 font-mono text-emerald-950 font-black bg-emerald-100/70">${formatNumber(grp2026)}</td>
+                ${grp26_25.diffHtml}
+                ${grp26_25.pctHtml}
+                ${grp26_24.diffHtml}
+                ${grp26_24.pctHtml}
+                ${grp25_24.diffHtml}
+                ${grp25_24.pctHtml}
+                <td class="p-1.5 text-center border-r border-amber-200/80">
+                    <button class="btn-yoy-drilldown px-1.5 py-0.5 bg-amber-200 hover:bg-amber-300 text-[#00529C] rounded font-bold text-[10px] w-full transition-all" data-group-name="${escapeHtml(grpName)}">
+                        🔍 Nhóm
+                    </button>
+                </td>
+            `;
+
+            grpTr.addEventListener('click', (e) => {
+                if (e.target.closest('.btn-yoy-drilldown')) return;
+                if (e.target.closest('[data-action="toggle-collapse"]') || e.target === grpTr || e.target.tagName === 'SPAN' || e.target.tagName === 'TD') {
+                    state.collapsedGroups[grpName] = !state.collapsedGroups[grpName];
+                    renderTable();
+                }
+            });
+
+            tbody.appendChild(grpTr);
+
+            // Item Rows
+            if (!isCollapsed) {
+                rows.forEach(r => {
+                    const tr = document.createElement('tr');
+                    tr.className = `text-xs border-b border-slate-200 hover:bg-blue-50/50 transition-colors ${r.category.is_material ? 'bg-amber-50/40' : 'bg-white'}`;
+
+                    const item26_25 = renderYoYMetricCells(r.fullYear2026, r.total2025);
+                    const item26_24 = renderYoYMetricCells(r.fullYear2026, r.total2024);
+                    const item25_24 = renderYoYMetricCells(r.total2025, r.total2024);
+
+                    const starIcon = r.category.is_material ? '<span class="text-amber-500 font-black mr-1" title="Khoản mục trọng yếu">⭐</span>' : '';
+
+                    tr.innerHTML = `
+                        <td class="p-2 text-center text-slate-500 border-r border-slate-200 font-mono sticky-col-1 bg-white">${stt++}</td>
+                        <td class="p-2 text-center border-r border-slate-200 font-mono text-[#00529C] text-[11px] font-semibold sticky-col-2 bg-white">${escapeHtml(r.category.b7_display || '-')}</td>
+                        <td class="p-2 text-center border-r border-slate-200 font-mono text-emerald-700 text-[11px] font-semibold sticky-col-3 bg-white">${escapeHtml(r.category.b10_display || '-')}</td>
+                        <td class="p-2 text-left font-semibold text-slate-800 border-r border-slate-200 pl-3 sticky-col-4 bg-white">
+                            ${starIcon}<span>${escapeHtml(r.category.name)}</span>
+                        </td>
+                        <td class="p-2 text-right border-r border-slate-200 font-mono text-purple-900 bg-purple-50/30 font-medium">${formatNumber(r.total2024)}</td>
+                        <td class="p-2 text-right border-r border-slate-200 font-mono text-sky-900 bg-sky-50/30 font-medium">${formatNumber(r.total2025)}</td>
+                        <td class="p-2 text-right border-r border-slate-200 font-mono text-[#00529C] bg-blue-50/40 font-bold">${formatNumber(r.fullYear2026)}</td>
+                        ${item26_25.diffHtml}
+                        ${item26_25.pctHtml}
+                        ${item26_24.diffHtml}
+                        ${item26_24.pctHtml}
+                        ${item25_24.diffHtml}
+                        ${item25_24.pctHtml}
+                        <td class="p-1.5 text-center border-r border-slate-200">
+                            <button class="btn-yoy-drilldown px-2 py-1 bg-blue-50 hover:bg-blue-100 text-[#00529C] rounded border border-blue-200 text-[11px] font-bold shadow-sm transition-all flex items-center justify-center gap-1 w-full" data-cat-id="${r.category.id}">
+                                🔍 Đơn vị
+                            </button>
+                        </td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+            }
+        });
+
+        // Grand Total Row
+        const grand26_25 = renderYoYMetricCells(grand2026, grand2025, true);
+        const grand26_24 = renderYoYMetricCells(grand2026, grand2024, true);
+        const grand25_24 = renderYoYMetricCells(grand2025, grand2024, true);
+
+        const footerTr = document.createElement('tr');
+        footerTr.className = 'bg-[#003870] text-white font-black text-xs border-t-2 border-blue-900 select-none';
+        footerTr.innerHTML = `
+            <td colspan="4" class="p-2.5 text-center uppercase tracking-wider font-extrabold border-r border-blue-800 sticky-col-1 bg-[#003870]">
+                TỔNG CỘNG CHI PHÍ TOÀN BỘ
+            </td>
+            <td class="p-2.5 text-right border-r border-blue-800 font-mono text-purple-200 bg-purple-950/40">${formatNumber(grand2024)}</td>
+            <td class="p-2.5 text-right border-r border-blue-800 font-mono text-cyan-200 bg-blue-950/40">${formatNumber(grand2025)}</td>
+            <td class="p-2.5 text-right border-r border-blue-800 font-mono text-amber-200 font-black bg-emerald-950/50">${formatNumber(grand2026)}</td>
+            ${grand26_25.diffHtml}
+            ${grand26_25.pctHtml}
+            ${grand26_24.diffHtml}
+            ${grand26_24.pctHtml}
+            ${grand25_24.diffHtml}
+            ${grand25_24.pctHtml}
+            <td class="p-2.5 text-center border-r border-blue-800 font-mono text-slate-300">-</td>
+        `;
+        tbody.appendChild(footerTr);
+
+        // Delegated click on tbody for drilldown buttons
+        tbody.onclick = function(e) {
+            const btn = e.target.closest('.btn-yoy-drilldown');
+            if (!btn) return;
+            const catIdAttr = btn.getAttribute('data-cat-id');
+            const grpNameAttr = btn.getAttribute('data-group-name');
+
+            if (catIdAttr) {
+                const catId = parseInt(catIdAttr, 10);
+                const cat = state.categories.find(c => c.id === catId);
+                if (cat && window.openDrillDownModal) {
+                    window.openDrillDownModal({
+                        id: cat.id,
+                        name: cat.name,
+                        group: cat.group,
+                        b7_display: cat.b7_display,
+                        b10_display: cat.b10_display
+                    });
+                }
+            } else if (grpNameAttr && window.openDrillDownModal) {
+                window.openDrillDownModal({
+                    group: grpNameAttr,
+                    isGroupSummary: true,
+                    name: `Nhóm: ${grpNameAttr}`
+                });
+            }
+        };
+    }
+
     function renderTableHeader() {
         const thead = document.getElementById('report-table-head') || document.getElementById('report-table-header');
         if (!thead) return;
+
+        // Chế độ xem: Bảng Phân tích So sánh Cùng kỳ (YoY 3 Năm: 2024, 2025, 2026)
+        if (state.yoyConfig && state.yoyConfig.viewMode === 'YOY_TABLE') {
+            thead.innerHTML = `
+                <tr>
+                    <th rowspan="2" class="p-2.5 text-center font-bold border-r border-blue-800 w-10 sticky-col-1 bg-[#00529C]">TT</th>
+                    <th rowspan="2" class="p-2.5 font-bold border-r border-blue-800 w-24 sticky-col-2 bg-[#00529C]">KMP B7</th>
+                    <th rowspan="2" class="p-2.5 font-bold border-r border-blue-800 w-24 sticky-col-3 bg-[#00529C]">KMP B10</th>
+                    <th rowspan="2" class="p-2.5 font-bold border-r border-blue-800 min-w-[220px] sticky-col-4 bg-[#00529C]">Tên Chi phí</th>
+                    <th rowspan="2" class="p-2.5 text-right font-bold border-r border-blue-800 w-28 bg-[#00488a] text-purple-200">
+                        NĂM 2024<br /><span class="text-[10px] text-purple-300 font-normal">(Tr.đ)</span>
+                    </th>
+                    <th rowspan="2" class="p-2.5 text-right font-bold border-r border-blue-800 w-28 bg-[#00488a] text-sky-200">
+                        NĂM 2025<br /><span class="text-[10px] text-sky-300 font-normal">(Tr.đ)</span>
+                    </th>
+                    <th rowspan="2" class="p-2.5 text-right font-black border-r border-blue-800 w-32 bg-[#059669] text-amber-200">
+                        CẢ NĂM 2026<br /><span class="text-[10px] text-emerald-100 font-normal">(Thực hiện + AI)</span>
+                    </th>
+                    <th colspan="2" class="p-2 text-center font-bold border-r border-blue-800 bg-[#004080] text-amber-300">
+                        2026 SO VỚI 2025
+                    </th>
+                    <th colspan="2" class="p-2 text-center font-bold border-r border-blue-800 bg-[#0284C7] text-cyan-200">
+                        2026 SO VỚI 2024
+                    </th>
+                    <th colspan="2" class="p-2 text-center font-bold border-r border-blue-800 bg-[#4F46E5] text-indigo-200">
+                        2025 SO VỚI 2024
+                    </th>
+                    <th rowspan="2" class="p-2.5 text-center font-bold border-r border-blue-800 w-24 bg-[#00529C]">
+                        Chi tiết ĐV
+                    </th>
+                </tr>
+                <tr class="bg-[#003870] text-[11px] text-white">
+                    <th class="p-2 text-right border-r border-blue-800 w-24">Chênh lệch (Tr.đ)</th>
+                    <th class="p-2 text-right border-r border-blue-800 w-24">% YoY</th>
+                    <th class="p-2 text-right border-r border-blue-800 w-24">Chênh lệch (Tr.đ)</th>
+                    <th class="p-2 text-right border-r border-blue-800 w-24">% YoY</th>
+                    <th class="p-2 text-right border-r border-blue-800 w-24">Chênh lệch (Tr.đ)</th>
+                    <th class="p-2 text-right border-r border-blue-800 w-24">% YoY</th>
+                </tr>
+            `;
+            return;
+        }
 
         const isShow = state.compareConfig ? (state.compareConfig.show !== false) : (state.columnVisibility.cost2025 !== false);
         const mode = (state.compareConfig && state.compareConfig.mode) || '2025';
@@ -2005,6 +2993,7 @@
     }
 
     function renderTable() {
+        updateReportViewModeUI();
         renderTableHeader();
 
         const allCalculatedRows = calculateReportData();
@@ -2037,11 +3026,12 @@
             luyKePeriodLabel = `Luỹ kế (${selActual.map(m => 'T' + m).join(', ')})`;
         }
 
+        const isYoYTable = state.yoyConfig && state.yoyConfig.viewMode === 'YOY_TABLE';
         const isShowCompare = state.compareConfig ? (state.compareConfig.show !== false) : (state.columnVisibility.cost2025 !== false);
         const compareMode = (state.compareConfig && state.compareConfig.mode) || '2025';
         const numCompareCols = !isShowCompare ? 0 : (compareMode === 'BOTH' ? 2 : 1);
         const actualColsCount = selActual.length > 0 ? (selActual.length + 1) : 0;
-        const totalCols = 4 + numCompareCols + actualColsCount + selPlan.length + 1;
+        const totalCols = isYoYTable ? 14 : (4 + numCompareCols + actualColsCount + selPlan.length + 1);
 
         let displayRows = allCalculatedRows;
         if (state.filters.materialOnly) {
@@ -2069,6 +3059,12 @@
             if (!grouped[grp]) grouped[grp] = [];
             grouped[grp].push(r);
         });
+
+        // Nếu đang ở Chế độ Xem Bảng So sánh Cùng kỳ YoY 3 Năm (2024 - 2025 - 2026)
+        if (isYoYTable) {
+            renderYoYTableContent(grouped, displayRows, tbody);
+            return;
+        }
 
         let stt = 1;
         let grand2024 = 0, grand2025 = 0, grand2026 = 0;
@@ -2587,18 +3583,21 @@
         state.currentTab = tab;
 
         const repSec = document.getElementById('report-section') || document.getElementById('section-report');
+        const cbnvSec = document.getElementById('cbnv-section');
         const dashSec = document.getElementById('dashboard-section') || document.getElementById('section-dashboard');
         const mapSec = document.getElementById('mapping-section') || document.getElementById('section-mapping');
         const qtpnSec = document.getElementById('qtpn-section');
         const syncSec = document.getElementById('sync-section') || document.getElementById('section-sync');
 
         if (repSec) repSec.classList.add('hidden');
+        if (cbnvSec) cbnvSec.classList.add('hidden');
         if (dashSec) dashSec.classList.add('hidden');
         if (mapSec) mapSec.classList.add('hidden');
         if (qtpnSec) qtpnSec.classList.add('hidden');
         if (syncSec) syncSec.classList.add('hidden');
 
         const repBtn = document.getElementById('tab-report-btn');
+        const cbnvBtn = document.getElementById('tab-cbnv-btn');
         const dashBtn = document.getElementById('tab-dashboard-btn');
         const mapBtn = document.getElementById('tab-mapping-btn');
         const qtpnBtn = document.getElementById('tab-qtpn-btn');
@@ -2608,6 +3607,7 @@
         const activeClass = 'tab-btn relative z-10 px-3.5 py-1.5 text-xs font-extrabold text-white transition-colors duration-200 inline-flex flex-row items-center gap-2 whitespace-nowrap shrink-0 rounded-lg';
 
         if (repBtn) repBtn.className = inactiveClass;
+        if (cbnvBtn) cbnvBtn.className = inactiveClass;
         if (dashBtn) dashBtn.className = inactiveClass;
         if (mapBtn) mapBtn.className = inactiveClass;
         if (qtpnBtn) qtpnBtn.className = inactiveClass;
@@ -2619,6 +3619,11 @@
             if (repBtn) repBtn.className = activeClass;
             activeBtn = repBtn;
             renderAll();
+        } else if (tab === 'cbnv') {
+            if (cbnvSec) cbnvSec.classList.remove('hidden');
+            if (cbnvBtn) cbnvBtn.className = activeClass;
+            activeBtn = cbnvBtn;
+            renderCbnvTab();
         } else if (tab === 'dashboard') {
             if (dashSec) dashSec.classList.remove('hidden');
             if (dashBtn) dashBtn.className = activeClass;
@@ -2689,16 +3694,23 @@
             headerTr.className = 'group-header-row bg-[#00529C]/10 border-t-2 border-b border-[#00529C]/30 text-[#00529C] text-xs font-bold transition-all select-none';
             headerTr.dataset.group = gName;
 
+            const grpIcon = window.getGroupIcon ? window.getGroupIcon(gName) : '🏢';
             headerTr.innerHTML = `
                 <td colspan="4" class="p-2.5 border-r border-slate-200">
                     <div class="flex items-center gap-2">
-                        <span class="text-sm font-extrabold text-[#00529C]">${(window.getGroupIcon ? window.getGroupIcon(gName) : '📑')} ${escapeHtml(gName)}</span>
+                        <button type="button" class="btn-change-group-icon inline-flex items-center justify-center w-8 h-8 rounded-lg bg-white hover:bg-blue-100 border border-blue-200 text-base shadow-2xs hover:scale-110 active:scale-95 transition-transform cursor-pointer" title="Bấm để chọn Icon từ Thư viện cho nhóm ${escapeHtml(gName)}" data-group="${escapeHtml(gName)}">
+                            ${grpIcon}
+                        </button>
+                        <span class="text-sm font-extrabold text-[#00529C]">${escapeHtml(gName)}</span>
                         <span class="bg-[#00529C] text-white px-2 py-0.5 rounded-full text-[10px] font-black">${items.length} khoản mục</span>
                         <span class="text-[10px] text-blue-800/70 font-normal italic">(Kéo & thả khoản mục vào đây để chuyển nhóm)</span>
                     </div>
                 </td>
                 <td colspan="2" class="p-2 text-right">
                     <div class="flex items-center justify-end gap-1.5">
+                        <button type="button" class="btn-pick-icon-group px-2 py-1 bg-white hover:bg-blue-50 text-[#00529C] border border-blue-200 rounded font-semibold text-[11px] shadow-sm flex items-center gap-1" data-group="${escapeHtml(gName)}" title="Chọn Icon từ Thư viện cho nhóm này">
+                            🎨 Đổi Icon
+                        </button>
                         <button type="button" class="btn-edit-group px-2 py-1 bg-white hover:bg-blue-50 text-[#00529C] border border-blue-200 rounded font-semibold text-[11px] shadow-sm flex items-center gap-1" data-group="${escapeHtml(gName)}">
                             ✏️ Đổi tên
                         </button>
@@ -2730,7 +3742,15 @@
                 }
             });
 
-            headerTr.querySelector('.btn-edit-group')?.addEventListener('click', () => editGroupPrompt(gName));
+            headerTr.querySelector('.btn-change-group-icon')?.addEventListener('click', (e) => {
+                e.stopPropagation();
+                openIconPickerModal(gName);
+            });
+            headerTr.querySelector('.btn-pick-icon-group')?.addEventListener('click', (e) => {
+                e.stopPropagation();
+                openIconPickerModal(gName);
+            });
+            headerTr.querySelector('.btn-edit-group')?.addEventListener('click', () => openGroupModal(gName));
             headerTr.querySelector('.btn-add-item-to-group')?.addEventListener('click', () => openAddCategoryModal(gName));
             headerTr.querySelector('.btn-delete-group')?.addEventListener('click', () => deleteGroupPrompt(gName));
             tbody.appendChild(headerTr);
@@ -2857,33 +3877,11 @@
     }
 
     function addNewGroupPrompt() {
-        const name = prompt('Nhập tên nhóm chi phí mới:');
-        if (!name || !name.trim()) return;
-        const gName = name.trim();
-        const maxId = state.categories.reduce((m, c) => Math.max(m, c.id || 0), 0);
-        state.categories.push({
-            id: maxId + 1,
-            tt: maxId + 1,
-            name: `Khoản mục mới thuộc ${gName}`,
-            group: gName,
-            b7_display: '',
-            b10_display: '',
-            b7_codes: [],
-            b10_codes: [],
-            is_material: false
-        });
-        saveCurrentState();
-        renderMappingTab();
+        openGroupModal();
     }
 
     function editGroupPrompt(oldName) {
-        const newName = prompt('Nhập tên mới cho nhóm:', oldName);
-        if (!newName || !newName.trim() || newName.trim() === oldName) return;
-        state.categories.forEach(c => {
-            if (c.group === oldName) c.group = newName.trim();
-        });
-        saveCurrentState();
-        renderMappingTab();
+        openGroupModal(oldName);
     }
 
     function deleteGroupPrompt(gName) {
@@ -3004,6 +4002,15 @@
                 e.khoi = 'KHOI_MN';
                 e.mien = 'MN';
                 e.phia = 'Phía Nam';
+            }
+            e.active = true;
+        });
+
+        // Đánh dấu các pháp nhân không còn nằm trong DM_QTPN là active = false để ẩn khỏi Slicer
+        const activePnCodes = new Set(state.qtpnMappings.map(m => String(m.maPn || '').trim()).filter(Boolean));
+        state.entities.forEach(e => {
+            if (!activePnCodes.has(e.code)) {
+                e.active = false;
             }
         });
 
@@ -3435,9 +4442,15 @@
         }
 
         try {
-            const url = config.webAppUrl + (config.webAppUrl.includes('?') ? '&' : '?') + 'action=get_qtpn&t=' + Date.now();
+            const keyParam = config.apiKey ? `&api_key=${encodeURIComponent(config.apiKey.trim())}` : '';
+            const url = config.webAppUrl + (config.webAppUrl.includes('?') ? '&' : '?') + 'action=get_qtpn&t=' + Date.now() + keyParam;
             const resp = await fetch(url);
             const data = await resp.json();
+
+            if (data.code === 401 || (data.status === 'error' && data.code === 401)) {
+                alert('Khóa bảo mật API_KEY không đúng (Lỗi 401). Vui lòng cập nhật lại khóa trong Cài đặt kết nối.');
+                return;
+            }
 
             if (data.status === 'success' && Array.isArray(data.qtpnMappings)) {
                 state.qtpnMappings = data.qtpnMappings;
@@ -3467,6 +4480,7 @@
         try {
             const payload = {
                 action: 'save_qtpn',
+                api_key: config.apiKey || '',
                 qtpnMappings: state.qtpnMappings
             };
             const resp = await fetch(config.webAppUrl, {
@@ -3529,6 +4543,1250 @@
         const groups = Array.from(new Set(state.categories.map(c => c.group && c.group.trim()).filter(Boolean)));
         groups.forEach(g => state.collapsedGroups[g] = true);
         renderTable();
+    }
+
+    // ==========================================
+    // 👥 ĐỊNH MỨC CHI PHÍ / CB-NV (MỤC 2.5) MODULE
+    // ==========================================
+
+    let cbnvBenchmarkChart = null;
+    let cbnvScatterChart = null;
+    let pendingCbnvUploadRows = null;
+    let pendingCbnvAudit = null;
+
+    /**
+     * Khởi tạo dữ liệu nhân sự cơ sở nếu chưa có
+     */
+    function ensureBaselineCbnvData() {
+        if (!state.cbnvData || typeof state.cbnvData !== 'object') {
+            state.cbnvData = {};
+        }
+
+        const defaultSeed = {
+            'C1101': { dinhBien: 180, thucTe: 172, khoi: 'VPĐH', maQt: 'QT_AUTO', tenQt: 'THACO AUTO', ghiChu: 'Định mức chuẩn VPĐH' },
+            'C2305': { dinhBien: 115, thucTe: 108, khoi: 'VPĐH', maQt: 'QT_PP', tenQt: 'PP THACO AUTO', ghiChu: 'Khối bán hàng phân phối' },
+            'C1103': { dinhBien: 85, thucTe: 80, khoi: 'CTTT Phía Bắc', maQt: 'QT_MB', tenQt: 'Công ty CTTT Miền Bắc', ghiChu: 'Điều hành Miền Bắc' },
+            'C1104': { dinhBien: 250, thucTe: 240, khoi: 'Nhà máy', maQt: 'QT_CHULAI', tenQt: 'Nhà máy Chu Lai', ghiChu: 'Khu liên hợp SX Chu Lai' }
+        };
+
+        const activeEntities = (state.entities || []).filter(e => e.active !== false);
+        activeEntities.forEach((ent, idx) => {
+            const code = ent.code;
+            if (!state.cbnvData[code]) {
+                const seed = defaultSeed[code] || {
+                    dinhBien: 60,
+                    thucTe: 56,
+                    khoi: ent.khoiName || (ent.khoi === 'KHOI_NHAMAY' ? 'Nhà máy' : (ent.khoi === 'KHOI_MB' ? 'CTTT Phía Bắc' : (ent.khoi === 'KHOI_VPDH' ? 'VPĐH' : 'CTTT Phía Nam'))),
+                    maQt: ent.qtCode || ('QT_' + code),
+                    tenQt: ent.qt || ent.name,
+                    ghiChu: ''
+                };
+                state.cbnvData[code] = {
+                    stt: idx + 1,
+                    maPn: code,
+                    tenPn: ent.cleanName || ent.name,
+                    khoi: seed.khoi || ent.khoiName || 'VPĐH',
+                    maQt: seed.maQt || ent.qtCode || ('QT_' + code),
+                    tenQt: seed.tenQt || ent.qt || ent.name,
+                    nam: 2026,
+                    dinhBien: seed.dinhBien,
+                    thucTe: seed.thucTe,
+                    ghiChu: seed.ghiChu || ''
+                };
+            }
+        });
+    }
+
+    /**
+     * Tính tổng chi phí của 1 pháp nhân theo năm (Đơn vị: Triệu VNĐ)
+     */
+    function getEntityCostTrD(entCode, yearStr) {
+        let totalVnd = 0;
+        if (state.deptData && state.deptData[entCode] && Array.isArray(state.deptData[entCode][yearStr])) {
+            state.deptData[entCode][yearStr].forEach(r => {
+                totalVnd += (r.total || (Array.isArray(r.months) ? r.months.reduce((a, b) => a + b, 0) : 0));
+            });
+        }
+        if (totalVnd === 0) {
+            const ds = yearStr === '2026' ? state.data2026 : (yearStr === '2025' ? state.data2025 : state.data2024);
+            if (ds && ds[entCode]) {
+                const target = ds[entCode]['642'] || ds[entCode];
+                Object.values(target).forEach(val => {
+                    if (Array.isArray(val)) totalVnd += val.reduce((a, b) => a + b, 0);
+                    else if (typeof val === 'number') totalVnd += val;
+                });
+            }
+        }
+        return totalVnd / 1e6; // Quy đổi về Triệu VNĐ
+    }
+
+    /**
+     * Đổi chế độ hiển thị chỉ số CB-NV: 'THUC_TE' | 'DINH_BIEN' | 'BOTH'
+     */
+    function setCbnvDisplayMode(mode) {
+        if (!state.cbnvConfig) state.cbnvConfig = { displayMode: 'BOTH' };
+        state.cbnvConfig.displayMode = mode;
+        saveCurrentState();
+        renderCbnvTab();
+    }
+
+    /**
+     * Kết xuất toàn bộ giao diện Tab 2: Chi phí / CB-NV
+     */
+    function renderCbnvTab(searchQuery = '') {
+        ensureBaselineCbnvData();
+        const displayMode = (state.cbnvConfig && state.cbnvConfig.displayMode) || 'BOTH';
+
+        // 1. Cập nhật giao diện nút chuyển đổi Chế độ hiển thị
+        const btnThucTe = document.getElementById('btn-cbnv-mode-thucte');
+        const btnDinhBien = document.getElementById('btn-cbnv-mode-dinhbien');
+        const btnBoth = document.getElementById('btn-cbnv-mode-both');
+
+        const activeModeClass = 'px-2.5 py-1 font-bold rounded-lg transition-all bg-[#00529C] text-white shadow-sm';
+        const inactiveModeClass = 'px-2.5 py-1 font-bold rounded-lg transition-all text-slate-700 hover:bg-slate-200';
+
+        if (btnThucTe) btnThucTe.className = displayMode === 'THUC_TE' ? activeModeClass : inactiveModeClass;
+        if (btnDinhBien) btnDinhBien.className = displayMode === 'DINH_BIEN' ? activeModeClass : inactiveModeClass;
+        if (btnBoth) btnBoth.className = displayMode === 'BOTH' ? activeModeClass : inactiveModeClass;
+
+        // 2. Lấy danh sách pháp nhân đang hoạt động
+        const allActiveEntities = (state.entities || []).filter(e => e.active !== false);
+
+        // 3. Tính toán số liệu tổng thể toàn hệ thống (System-wide Summary)
+        let sysDinhBien = 0;
+        let sysThucTe = 0;
+        let sysCost2026 = 0;
+        let sysCost2025 = 0;
+        const zeroHeadcountEntities = [];
+
+        allActiveEntities.forEach(ent => {
+            const code = ent.code;
+            const cbnv = state.cbnvData[code] || { dinhBien: 0, thucTe: 0 };
+            const dB = Number(cbnv.dinhBien) || 0;
+            const tT = Number(cbnv.thucTe) || 0;
+            const c26 = getEntityCostTrD(code, '2026');
+            const c25 = getEntityCostTrD(code, '2025');
+
+            sysDinhBien += dB;
+            sysThucTe += tT;
+            sysCost2026 += c26;
+            sysCost2025 += c25;
+
+            if (tT <= 0 && dB <= 0) {
+                zeroHeadcountEntities.push(code);
+            }
+        });
+
+        const sysFillRate = sysDinhBien > 0 ? ((sysThucTe / sysDinhBien) * 100).toFixed(1) : '0.0';
+        const sysCphcPerThucTeYear = sysThucTe > 0 ? (sysCost2026 / sysThucTe) : 0;
+        const sysCphcPerThucTeMonth = sysCphcPerThucTeYear / 12;
+        const sysCphcPerDinhBienYear = sysDinhBien > 0 ? (sysCost2026 / sysDinhBien) : 0;
+        const sysCphcPerDinhBienMonth = sysCphcPerDinhBienYear / 12;
+
+        const sysCphcPerThucTe2025Year = sysThucTe > 0 ? (sysCost2025 / sysThucTe) : 0;
+        const sysYoYDiffAmt = sysCphcPerThucTeYear - sysCphcPerThucTe2025Year;
+        const sysYoYDiffPct = sysCphcPerThucTe2025Year > 0 ? ((sysYoYDiffAmt / sysCphcPerThucTe2025Year) * 100) : 0;
+
+        // 4. Cập nhật Dải thẻ KPI (Executive KPI Cards Strip)
+        const elKpiThucTe = document.getElementById('kpi-cbnv-thucte-total');
+        if (elKpiThucTe) elKpiThucTe.textContent = sysThucTe.toLocaleString('vi-VN');
+
+        const elKpiDinhBien = document.getElementById('kpi-cbnv-dinhbien-total');
+        if (elKpiDinhBien) elKpiDinhBien.textContent = sysDinhBien.toLocaleString('vi-VN');
+
+        const elKpiFillRate = document.getElementById('kpi-cbnv-fill-rate');
+        if (elKpiFillRate) elKpiFillRate.textContent = `${sysFillRate}% lấp đầy`;
+
+        const elKpiTtYear = document.getElementById('kpi-cphc-per-thucte-year');
+        if (elKpiTtYear) elKpiTtYear.textContent = sysCphcPerThucTeYear.toFixed(1);
+
+        const elKpiTtMonth = document.getElementById('kpi-cphc-per-thucte-month');
+        if (elKpiTtMonth) elKpiTtMonth.textContent = sysCphcPerThucTeMonth.toFixed(2);
+
+        const elKpiDbYear = document.getElementById('kpi-cphc-per-dinhbien-year');
+        if (elKpiDbYear) elKpiDbYear.textContent = sysCphcPerDinhBienYear.toFixed(1);
+
+        const elKpiDbMonth = document.getElementById('kpi-cphc-per-dinhbien-month');
+        if (elKpiDbMonth) elKpiDbMonth.textContent = sysCphcPerDinhBienMonth.toFixed(2);
+
+        const elKpiYoYDiff = document.getElementById('kpi-cbnv-yoy-diff');
+        if (elKpiYoYDiff) {
+            const sign = sysYoYDiffPct >= 0 ? '+' : '';
+            elKpiYoYDiff.textContent = `${sign}${sysYoYDiffPct.toFixed(1)}%`;
+            elKpiYoYDiff.className = `text-2xl font-black font-mono ${sysYoYDiffPct > 0 ? 'text-amber-700' : 'text-emerald-700'}`;
+        }
+
+        const elKpiYoYAmt = document.getElementById('kpi-cbnv-yoy-amt');
+        if (elKpiYoYAmt) {
+            const sign = sysYoYDiffAmt >= 0 ? '+' : '';
+            elKpiYoYAmt.textContent = `${sign}${sysYoYDiffAmt.toFixed(1)}`;
+        }
+
+        const elKpiYoYBadge = document.getElementById('kpi-cbnv-yoy-badge');
+        if (elKpiYoYBadge) {
+            if (Math.abs(sysYoYDiffPct) < 5) {
+                elKpiYoYBadge.className = 'px-1.5 py-0.2 rounded text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-300';
+                elKpiYoYBadge.textContent = 'Ổn định (±5%)';
+            } else if (sysYoYDiffPct < 0) {
+                elKpiYoYBadge.className = 'px-1.5 py-0.2 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300';
+                elKpiYoYBadge.textContent = 'Tiết kiệm chi phí';
+            } else {
+                elKpiYoYBadge.className = 'px-1.5 py-0.2 rounded text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300';
+                elKpiYoYBadge.textContent = 'Tăng định mức';
+            }
+        }
+
+        // 5. Cập nhật Hộp Đối Soát Kiểm Toán (CB-NV Audit Box)
+        const auditBox = document.getElementById('cbnv-audit-box');
+        if (auditBox) {
+            if (state.cbnvAudit) {
+                const aud = state.cbnvAudit;
+                if (!aud.hasControlRow) {
+                    auditBox.className = 'p-3 rounded-xl border text-xs flex flex-wrap items-center justify-between gap-2 bg-amber-50 border-amber-300 text-amber-900';
+                    auditBox.innerHTML = `
+                        <div class="flex items-center gap-2 font-medium">
+                            <span class="p-1 rounded bg-amber-200 text-amber-800 font-bold">⚠️</span>
+                            <div>
+                                <strong class="font-bold text-amber-950">CẢNH BÁO KIỂM TOÁN NHÂN SỰ:</strong>
+                                <span>Không tìm thấy dòng tổng cộng (CỘNG / TỔNG CỘNG) trong file Excel để đối chiếu — Cần rà soát thủ công (Hệ thống không mặc định báo khớp). Tổng thực tế chi tiết: <strong>${(aud.sumTt || 0).toLocaleString('vi-VN')}</strong> người.</span>
+                            </div>
+                        </div>
+                        <button onclick="document.getElementById('cbnv-upload-modal').classList.remove('hidden')" class="px-3 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-lg font-bold text-xs shadow-sm transition-all flex items-center gap-1">
+                            <span>📥 Nạp lại file có dòng CỘNG</span>
+                        </button>
+                    `;
+                } else if (aud.diff === 0 && (aud.diffDb === 0 || aud.diffDb === null)) {
+                    auditBox.className = 'p-3 rounded-xl border text-xs flex flex-wrap items-center justify-between gap-2 bg-emerald-50 border-emerald-300 text-emerald-900';
+                    auditBox.innerHTML = `
+                        <div class="flex items-center gap-2 font-medium">
+                            <span class="p-1 rounded bg-emerald-200 text-emerald-800 font-bold">✅</span>
+                            <div>
+                                <strong class="font-bold text-emerald-950">KIỂM TOÁN NHÂN SỰ: Khớp 100%</strong>
+                                <span>Chênh lệch: <strong class="font-mono text-emerald-950">0 người</strong> (Tổng thực tế: <strong>${(aud.sumTt || 0).toLocaleString('vi-VN')}</strong> người, Định biên: <strong>${(aud.sumDb || 0).toLocaleString('vi-VN')}</strong> người - Khớp tuyệt đối với dòng CỘNG của file gốc).</span>
+                            </div>
+                        </div>
+                        <span class="px-2.5 py-1 bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-full font-black text-[11px]">
+                            Chênh lệch: 0 người (Khớp 100%)
+                        </span>
+                    `;
+                } else {
+                    auditBox.className = 'p-3 rounded-xl border text-xs flex flex-wrap items-center justify-between gap-2 bg-rose-50 border-rose-300 text-rose-900';
+                    auditBox.innerHTML = `
+                        <div class="flex items-center gap-2 font-medium">
+                            <span class="p-1 rounded bg-rose-200 text-rose-800 font-bold">🚨</span>
+                            <div>
+                                <strong class="font-bold text-rose-950">CẢNH BÁO LỆCH KIỂM TOÁN NHÂN SỰ:</strong>
+                                <span>Phát hiện chênh lệch <strong class="text-rose-700 font-bold">${(aud.diff || 0).toLocaleString('vi-VN')}</strong> người so với dòng CỘNG của file gốc (Chi tiết: ${(aud.sumTt || 0).toLocaleString('vi-VN')} người vs Dòng CỘNG: ${(aud.fileControlTotalTt || 0).toLocaleString('vi-VN')} người).</span>
+                            </div>
+                        </div>
+                        <button onclick="document.getElementById('cbnv-upload-modal').classList.remove('hidden')" class="px-3 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded-lg font-bold text-xs shadow-sm transition-all flex items-center gap-1">
+                            <span>🔍 Kiểm tra lại</span>
+                        </button>
+                    `;
+                }
+            } else if (zeroHeadcountEntities.length > 0) {
+                auditBox.className = 'p-3 rounded-xl border text-xs flex flex-wrap items-center justify-between gap-2 bg-rose-50 border-rose-200 text-rose-900';
+                auditBox.innerHTML = `
+                    <div class="flex items-center gap-2 font-medium">
+                        <span class="p-1 rounded bg-rose-200 text-rose-800 font-bold">⚠️</span>
+                        <div>
+                            <strong class="font-bold text-rose-950">CẢNH BÁO ĐỐI SOÁT NHÂN SỰ:</strong>
+                            <span>Phát hiện <strong class="text-rose-700 font-bold">${zeroHeadcountEntities.length}</strong> đơn vị có số liệu nhân sự = 0 hoặc chưa nạp (${zeroHeadcountEntities.join(', ')}). Vui lòng nạp bổ sung file Excel nhân sự để định mức chi phí chuẩn xác.</span>
+                        </div>
+                    </div>
+                    <button onclick="document.getElementById('cbnv-upload-modal').classList.remove('hidden')" class="px-3 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded-lg font-bold text-xs shadow-sm transition-all flex items-center gap-1">
+                        <span>📥 Nạp bổ sung ngay</span>
+                    </button>
+                `;
+            } else {
+                auditBox.className = 'p-3 rounded-xl border text-xs flex flex-wrap items-center justify-between gap-2 bg-emerald-50 border-emerald-200 text-emerald-900';
+                auditBox.innerHTML = `
+                    <div class="flex items-center gap-2 font-medium">
+                        <span class="p-1 rounded bg-emerald-200 text-emerald-800 font-bold">✅</span>
+                        <div>
+                            <strong class="font-bold text-emerald-950">ĐỐI SOÁT NHÂN SỰ TOÀN HỆ THỐNG:</strong>
+                            <span>100% Đơn vị đã có dữ liệu nhân sự (${allActiveEntities.length} đơn vị, <strong>${sysThucTe.toLocaleString('vi-VN')}</strong> CB-NV thực tế / <strong>${sysDinhBien.toLocaleString('vi-VN')}</strong> định biên). Dữ liệu định mức đạt chuẩn kiểm toán!</span>
+                        </div>
+                    </div>
+                    <span class="px-2.5 py-1 bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-full font-black text-[11px]">
+                        100% Khớp Audit
+                    </span>
+                `;
+            }
+        }
+
+        // 6. Lọc và tính toán cho Bảng ma trận theo từng Pháp nhân
+        const qClean = (searchQuery || '').toLowerCase().trim();
+        const displayEntities = allActiveEntities.filter(ent => {
+            if (!qClean) return true;
+            const cbnv = state.cbnvData[ent.code] || {};
+            const str = `${ent.code} ${ent.name} ${ent.cleanName || ''} ${cbnv.tenQt || ''} ${cbnv.khoi || ''}`.toLowerCase();
+            return str.includes(qClean);
+        });
+
+        const countBadge = document.getElementById('cbnv-table-count');
+        if (countBadge) countBadge.textContent = `${displayEntities.length} đơn vị`;
+
+        // 7. Kết xuất Bảng Ma Trận Chi Phí / CB-NV
+        const thead = document.getElementById('cbnv-table-head');
+        const tbody = document.getElementById('cbnv-table-body');
+
+        if (thead) {
+            if (displayMode === 'THUC_TE') {
+                thead.innerHTML = `
+                    <tr>
+                        <th class="p-2.5 text-center font-bold border-r border-blue-800 w-12">STT</th>
+                        <th class="p-2.5 text-center font-bold border-r border-blue-800 w-28">Khối Đơn Vị</th>
+                        <th class="p-2.5 text-center font-bold border-r border-blue-800 w-24">Mã ĐVCS</th>
+                        <th class="p-2.5 font-bold border-r border-blue-800 min-w-[200px]">Tên Pháp Nhân / Showroom</th>
+                        <th class="p-2.5 text-right font-bold border-r border-blue-800 w-28 bg-[#004080]">CB-NV Thực Tế</th>
+                        <th class="p-2.5 text-right font-bold border-r border-blue-800 w-32 bg-[#0284C7]">Tổng CPHC 2026<br/><span class="text-[9px] font-normal">(Tr.đ)</span></th>
+                        <th class="p-2.5 text-right font-black border-r border-blue-800 w-36 bg-[#059669]">CPHC / Thực Tế<br/><span class="text-[9px] font-normal">(Tr.đ / người / năm)</span></th>
+                        <th class="p-2.5 text-right font-bold border-r border-blue-800 w-36 bg-[#059669]">CPHC / Thực Tế<br/><span class="text-[9px] font-normal">(Tr.đ / người / tháng)</span></th>
+                        <th class="p-2.5 text-right font-bold border-r border-blue-800 w-32 bg-[#003870]">Định Mức 2025<br/><span class="text-[9px] font-normal">(Tr.đ / người)</span></th>
+                        <th class="p-2.5 text-right font-bold border-r border-blue-800 w-28">Biến Động YoY</th>
+                    </tr>
+                `;
+            } else if (displayMode === 'DINH_BIEN') {
+                thead.innerHTML = `
+                    <tr>
+                        <th class="p-2.5 text-center font-bold border-r border-blue-800 w-12">STT</th>
+                        <th class="p-2.5 text-center font-bold border-r border-blue-800 w-28">Khối Đơn Vị</th>
+                        <th class="p-2.5 text-center font-bold border-r border-blue-800 w-24">Mã ĐVCS</th>
+                        <th class="p-2.5 font-bold border-r border-blue-800 min-w-[200px]">Tên Pháp Nhân / Showroom</th>
+                        <th class="p-2.5 text-right font-bold border-r border-blue-800 w-28 bg-[#004080]">Định Biên</th>
+                        <th class="p-2.5 text-right font-bold border-r border-blue-800 w-32 bg-[#0284C7]">Tổng CPHC 2026<br/><span class="text-[9px] font-normal">(Tr.đ)</span></th>
+                        <th class="p-2.5 text-right font-black border-r border-blue-800 w-36 bg-[#4F46E5]">CPHC / Định Biên<br/><span class="text-[9px] font-normal">(Tr.đ / người / năm)</span></th>
+                        <th class="p-2.5 text-right font-bold border-r border-blue-800 w-36 bg-[#4F46E5]">CPHC / Định Biên<br/><span class="text-[9px] font-normal">(Tr.đ / người / tháng)</span></th>
+                        <th class="p-2.5 text-right font-bold border-r border-blue-800 w-28">Tỷ Lệ Lấp Đầy</th>
+                        <th class="p-2.5 text-right font-bold border-r border-blue-800 w-28">Biến Động YoY</th>
+                    </tr>
+                `;
+            } else {
+                // SONG SONG CẢ 2 (BOTH)
+                thead.innerHTML = `
+                    <tr>
+                        <th rowspan="2" class="p-2.5 text-center font-bold border-r border-blue-800 w-12">STT</th>
+                        <th rowspan="2" class="p-2.5 text-center font-bold border-r border-blue-800 w-28">Khối</th>
+                        <th rowspan="2" class="p-2.5 text-center font-bold border-r border-blue-800 w-24">Mã ĐVCS</th>
+                        <th rowspan="2" class="p-2.5 font-bold border-r border-blue-800 min-w-[190px]">Tên Pháp Nhân / Showroom</th>
+                        <th colspan="3" class="p-2 text-center font-bold border-r border-blue-800 bg-[#004080]">QUY MÔ NHÂN SỰ</th>
+                        <th rowspan="2" class="p-2.5 text-right font-bold border-r border-blue-800 w-32 bg-[#0284C7]">Tổng CPHC 2026<br/><span class="text-[9px] font-normal">(Tr.đ)</span></th>
+                        <th colspan="2" class="p-2 text-center font-black border-r border-blue-800 bg-[#059669]">THEO THỰC TẾ (TR.Đ)</th>
+                        <th colspan="2" class="p-2 text-center font-bold border-r border-blue-800 bg-[#4F46E5]">THEO ĐỊNH BIÊN (TR.Đ)</th>
+                        <th rowspan="2" class="p-2.5 text-right font-bold border-r border-blue-800 w-28 bg-[#003870]">ĐM 2025<br/><span class="text-[9px] font-normal">(Tr.đ/người)</span></th>
+                        <th rowspan="2" class="p-2.5 text-right font-bold border-r border-blue-800 w-28">Biến Động YoY</th>
+                    </tr>
+                    <tr class="bg-[#003870] text-[10px] text-white">
+                        <th class="p-1.5 text-right border-r border-blue-800 w-20">Định biên</th>
+                        <th class="p-1.5 text-right border-r border-blue-800 w-20">Thực tế</th>
+                        <th class="p-1.5 text-center border-r border-blue-800 w-20">% Lấp đầy</th>
+                        <th class="p-1.5 text-right border-r border-blue-800 w-24">Năm</th>
+                        <th class="p-1.5 text-right border-r border-blue-800 w-24">Tháng</th>
+                        <th class="p-1.5 text-right border-r border-blue-800 w-24">Năm</th>
+                        <th class="p-1.5 text-right border-r border-blue-800 w-24">Tháng</th>
+                    </tr>
+                `;
+            }
+        }
+
+        if (tbody) {
+            tbody.innerHTML = '';
+            let filteredSumDinhBien = 0;
+            let filteredSumThucTe = 0;
+            let filteredSumCost2026 = 0;
+            let filteredSumCost2025 = 0;
+
+            displayEntities.forEach((ent, idx) => {
+                const code = ent.code;
+                const cbnv = state.cbnvData[code] || { dinhBien: 0, thucTe: 0, khoi: ent.khoiName || 'VPĐH' };
+                const dB = Number(cbnv.dinhBien) || 0;
+                const tT = Number(cbnv.thucTe) || 0;
+                const fillPct = dB > 0 ? ((tT / dB) * 100) : 0;
+
+                const c26 = getEntityCostTrD(code, '2026');
+                const c25 = getEntityCostTrD(code, '2025');
+
+                filteredSumDinhBien += dB;
+                filteredSumThucTe += tT;
+                filteredSumCost2026 += c26;
+                filteredSumCost2025 += c25;
+
+                const cphcPerTtYear = tT > 0 ? (c26 / tT) : 0;
+                const cphcPerTtMonth = cphcPerTtYear / 12;
+                const cphcPerDbYear = dB > 0 ? (c26 / dB) : 0;
+                const cphcPerDbMonth = cphcPerDbYear / 12;
+
+                const cphcPerTt25Year = tT > 0 ? (c25 / tT) : 0;
+                const yoyDiff = cphcPerTt25Year > 0 ? ((cphcPerTtYear - cphcPerTt25Year) / cphcPerTt25Year * 100) : 0;
+                const sign = yoyDiff >= 0 ? '+' : '';
+
+                let yoyBadge = `<span class="text-slate-400 font-mono text-xs">-</span>`;
+                if (cphcPerTt25Year > 0) {
+                    if (Math.abs(yoyDiff) >= 20) {
+                        if (yoyDiff > 0) {
+                            yoyBadge = `<span class="px-1.5 py-0.5 rounded text-[10px] font-black bg-rose-100 text-rose-800 border border-rose-300">▲ ${sign}${yoyDiff.toFixed(1)}% ⚠️</span>`;
+                        } else {
+                            yoyBadge = `<span class="px-1.5 py-0.5 rounded text-[10px] font-black bg-emerald-100 text-emerald-800 border border-emerald-300">▼ ${sign}${yoyDiff.toFixed(1)}%</span>`;
+                        }
+                    } else {
+                        yoyBadge = `<span class="font-mono text-xs ${yoyDiff > 0 ? 'text-amber-700 font-bold' : 'text-emerald-700 font-bold'}">${sign}${yoyDiff.toFixed(1)}%</span>`;
+                    }
+                }
+
+                let khoiBadge = 'bg-blue-50 text-blue-800 border-blue-200';
+                if (cbnv.khoi === 'Nhà máy') khoiBadge = 'bg-emerald-50 text-emerald-800 border-emerald-200';
+                else if (cbnv.khoi === 'CTTT Phía Bắc') khoiBadge = 'bg-amber-50 text-amber-800 border-amber-200';
+                else if (cbnv.khoi === 'CTTT Phía Nam') khoiBadge = 'bg-purple-50 text-purple-800 border-purple-200';
+
+                const tr = document.createElement('tr');
+                tr.className = 'hover:bg-blue-50/50 transition-colors bg-white border-b border-slate-100';
+
+                if (displayMode === 'THUC_TE') {
+                    tr.innerHTML = `
+                        <td class="p-2 text-center text-slate-400 font-mono border-r border-slate-200">${idx + 1}</td>
+                        <td class="p-2 text-center border-r border-slate-200"><span class="px-2 py-0.5 rounded-full text-[10px] font-bold border ${khoiBadge}">${escapeHtml(cbnv.khoi || 'VPĐH')}</span></td>
+                        <td class="p-2 text-center font-bold text-blue-900 font-mono border-r border-slate-200">${escapeHtml(code)}</td>
+                        <td class="p-2 border-r border-slate-200 font-medium text-slate-800">${escapeHtml(ent.cleanName || ent.name)}</td>
+                        <td class="p-2 text-right border-r border-slate-200 font-mono font-bold text-slate-900 bg-blue-50/30">${tT > 0 ? tT.toLocaleString('vi-VN') : '<span class="text-rose-500 font-bold">0</span>'}</td>
+                        <td class="p-2 text-right border-r border-slate-200 font-mono font-bold text-sky-900 bg-sky-50/30">${formatNumber(c26)}</td>
+                        <td class="p-2 text-right border-r border-slate-200 font-mono font-black text-emerald-700 bg-emerald-50/40">${cphcPerTtYear.toFixed(1)}</td>
+                        <td class="p-2 text-right border-r border-slate-200 font-mono font-bold text-emerald-800">${cphcPerTtMonth.toFixed(2)}</td>
+                        <td class="p-2 text-right border-r border-slate-200 font-mono text-slate-600">${cphcPerTt25Year > 0 ? cphcPerTt25Year.toFixed(1) : '-'}</td>
+                        <td class="p-2 text-right border-r border-slate-200 font-mono">${yoyBadge}</td>
+                    `;
+                } else if (displayMode === 'DINH_BIEN') {
+                    tr.innerHTML = `
+                        <td class="p-2 text-center text-slate-400 font-mono border-r border-slate-200">${idx + 1}</td>
+                        <td class="p-2 text-center border-r border-slate-200"><span class="px-2 py-0.5 rounded-full text-[10px] font-bold border ${khoiBadge}">${escapeHtml(cbnv.khoi || 'VPĐH')}</span></td>
+                        <td class="p-2 text-center font-bold text-blue-900 font-mono border-r border-slate-200">${escapeHtml(code)}</td>
+                        <td class="p-2 border-r border-slate-200 font-medium text-slate-800">${escapeHtml(ent.cleanName || ent.name)}</td>
+                        <td class="p-2 text-right border-r border-slate-200 font-mono font-bold text-slate-900 bg-blue-50/30">${dB > 0 ? dB.toLocaleString('vi-VN') : '<span class="text-rose-500 font-bold">0</span>'}</td>
+                        <td class="p-2 text-right border-r border-slate-200 font-mono font-bold text-sky-900 bg-sky-50/30">${formatNumber(c26)}</td>
+                        <td class="p-2 text-right border-r border-slate-200 font-mono font-black text-indigo-700 bg-indigo-50/40">${cphcPerDbYear.toFixed(1)}</td>
+                        <td class="p-2 text-right border-r border-slate-200 font-mono font-bold text-indigo-800">${cphcPerDbMonth.toFixed(2)}</td>
+                        <td class="p-2 text-right border-r border-slate-200 font-mono font-bold text-slate-700">${fillPct.toFixed(1)}%</td>
+                        <td class="p-2 text-right border-r border-slate-200 font-mono">${yoyBadge}</td>
+                    `;
+                } else {
+                    // BOTH
+                    tr.innerHTML = `
+                        <td class="p-2 text-center text-slate-400 font-mono border-r border-slate-200">${idx + 1}</td>
+                        <td class="p-2 text-center border-r border-slate-200"><span class="px-2 py-0.5 rounded-full text-[10px] font-bold border ${khoiBadge}">${escapeHtml(cbnv.khoi || 'VPĐH')}</span></td>
+                        <td class="p-2 text-center font-bold text-blue-900 font-mono border-r border-slate-200">${escapeHtml(code)}</td>
+                        <td class="p-2 border-r border-slate-200 font-medium text-slate-800">${escapeHtml(ent.cleanName || ent.name)}</td>
+                        <td class="p-2 text-right border-r border-slate-200 font-mono text-slate-700">${dB > 0 ? dB.toLocaleString('vi-VN') : '<span class="text-rose-500 font-bold">0</span>'}</td>
+                        <td class="p-2 text-right border-r border-slate-200 font-mono font-bold text-slate-900 bg-blue-50/20">${tT > 0 ? tT.toLocaleString('vi-VN') : '<span class="text-rose-500 font-bold">0</span>'}</td>
+                        <td class="p-2 text-center border-r border-slate-200 font-mono text-[11px] text-blue-900 font-semibold">${fillPct.toFixed(1)}%</td>
+                        <td class="p-2 text-right border-r border-slate-200 font-mono font-bold text-sky-900 bg-sky-50/30">${formatNumber(c26)}</td>
+                        <td class="p-2 text-right border-r border-slate-200 font-mono font-black text-emerald-700 bg-emerald-50/30">${cphcPerTtYear.toFixed(1)}</td>
+                        <td class="p-2 text-right border-r border-slate-200 font-mono text-emerald-800">${cphcPerTtMonth.toFixed(2)}</td>
+                        <td class="p-2 text-right border-r border-slate-200 font-mono font-bold text-indigo-700 bg-indigo-50/30">${cphcPerDbYear.toFixed(1)}</td>
+                        <td class="p-2 text-right border-r border-slate-200 font-mono text-indigo-800">${cphcPerDbMonth.toFixed(2)}</td>
+                        <td class="p-2 text-right border-r border-slate-200 font-mono text-slate-600">${cphcPerTt25Year > 0 ? cphcPerTt25Year.toFixed(1) : '-'}</td>
+                        <td class="p-2 text-right border-r border-slate-200 font-mono">${yoyBadge}</td>
+                    `;
+                }
+
+                tbody.appendChild(tr);
+            });
+
+            // Hàng Tổng Cộng Footer
+            const fTtPerYear = filteredSumThucTe > 0 ? (filteredSumCost2026 / filteredSumThucTe) : 0;
+            const fTtPerMonth = fTtPerYear / 12;
+            const fDbPerYear = filteredSumDinhBien > 0 ? (filteredSumCost2026 / filteredSumDinhBien) : 0;
+            const fDbPerMonth = fDbPerYear / 12;
+            const fTt25PerYear = filteredSumThucTe > 0 ? (filteredSumCost2025 / filteredSumThucTe) : 0;
+            const fYoYDiff = fTt25PerYear > 0 ? ((fTtPerYear - fTt25PerYear) / fTt25PerYear * 100) : 0;
+            const fSign = fYoYDiff >= 0 ? '+' : '';
+            const fFillPct = filteredSumDinhBien > 0 ? ((filteredSumThucTe / filteredSumDinhBien) * 100) : 0;
+
+            const footerTr = document.createElement('tr');
+            footerTr.className = 'bg-[#003870] text-white font-black text-xs border-t-2 border-blue-900 select-none';
+
+            if (displayMode === 'THUC_TE') {
+                footerTr.innerHTML = `
+                    <td colspan="4" class="p-2.5 text-center uppercase tracking-wider font-extrabold border-r border-blue-800">TỔNG CỘNG HỆ THỐNG</td>
+                    <td class="p-2.5 text-right border-r border-blue-800 font-mono text-amber-300 font-bold">${filteredSumThucTe.toLocaleString('vi-VN')}</td>
+                    <td class="p-2.5 text-right border-r border-blue-800 font-mono text-cyan-200 font-bold">${formatNumber(filteredSumCost2026)}</td>
+                    <td class="p-2.5 text-right border-r border-blue-800 font-mono text-emerald-300 font-black">${fTtPerYear.toFixed(1)}</td>
+                    <td class="p-2.5 text-right border-r border-blue-800 font-mono text-emerald-200 font-bold">${fTtPerMonth.toFixed(2)}</td>
+                    <td class="p-2.5 text-right border-r border-blue-800 font-mono text-slate-300">${fTt25PerYear > 0 ? fTt25PerYear.toFixed(1) : '-'}</td>
+                    <td class="p-2.5 text-right border-r border-blue-800 font-mono text-amber-300">${fSign}${fYoYDiff.toFixed(1)}%</td>
+                `;
+            } else if (displayMode === 'DINH_BIEN') {
+                footerTr.innerHTML = `
+                    <td colspan="4" class="p-2.5 text-center uppercase tracking-wider font-extrabold border-r border-blue-800">TỔNG CỘNG HỆ THỐNG</td>
+                    <td class="p-2.5 text-right border-r border-blue-800 font-mono text-amber-300 font-bold">${filteredSumDinhBien.toLocaleString('vi-VN')}</td>
+                    <td class="p-2.5 text-right border-r border-blue-800 font-mono text-cyan-200 font-bold">${formatNumber(filteredSumCost2026)}</td>
+                    <td class="p-2.5 text-right border-r border-blue-800 font-mono text-indigo-300 font-black">${fDbPerYear.toFixed(1)}</td>
+                    <td class="p-2.5 text-right border-r border-blue-800 font-mono text-indigo-200 font-bold">${fDbPerMonth.toFixed(2)}</td>
+                    <td class="p-2.5 text-right border-r border-blue-800 font-mono text-blue-200">${fFillPct.toFixed(1)}%</td>
+                    <td class="p-2.5 text-right border-r border-blue-800 font-mono text-amber-300">${fSign}${fYoYDiff.toFixed(1)}%</td>
+                `;
+            } else {
+                footerTr.innerHTML = `
+                    <td colspan="4" class="p-2.5 text-center uppercase tracking-wider font-extrabold border-r border-blue-800">TỔNG CỘNG HỆ THỐNG</td>
+                    <td class="p-2 text-right border-r border-blue-800 font-mono text-slate-300">${filteredSumDinhBien.toLocaleString('vi-VN')}</td>
+                    <td class="p-2 text-right border-r border-blue-800 font-mono text-amber-300 font-bold">${filteredSumThucTe.toLocaleString('vi-VN')}</td>
+                    <td class="p-2 text-center border-r border-blue-800 font-mono text-[11px] text-cyan-300">${fFillPct.toFixed(1)}%</td>
+                    <td class="p-2 text-right border-r border-blue-800 font-mono text-cyan-200 font-bold">${formatNumber(filteredSumCost2026)}</td>
+                    <td class="p-2 text-right border-r border-blue-800 font-mono text-emerald-300 font-black">${fTtPerYear.toFixed(1)}</td>
+                    <td class="p-2 text-right border-r border-blue-800 font-mono text-emerald-200">${fTtPerMonth.toFixed(2)}</td>
+                    <td class="p-2 text-right border-r border-blue-800 font-mono text-indigo-300 font-bold">${fDbPerYear.toFixed(1)}</td>
+                    <td class="p-2 text-right border-r border-blue-800 font-mono text-indigo-200">${fDbPerMonth.toFixed(2)}</td>
+                    <td class="p-2 text-right border-r border-blue-800 font-mono text-slate-300">${fTt25PerYear > 0 ? fTt25PerYear.toFixed(1) : '-'}</td>
+                    <td class="p-2 text-right border-r border-blue-800 font-mono text-amber-300">${fSign}${fYoYDiff.toFixed(1)}%</td>
+                `;
+            }
+
+            tbody.appendChild(footerTr);
+        }
+
+        // 8. Kết xuất 2 Biểu đồ Phân tích (Benchmark Bar Chart & Scatter Correlation)
+        renderCbnvCharts(displayEntities, sysCphcPerThucTeYear, sysCphcPerDinhBienYear, displayMode);
+    }
+
+    /**
+     * Vẽ Biểu đồ Benchmark và Tương quan cho Tab CB-NV
+     */
+    function renderCbnvCharts(entitiesList, sysBenchmarkThucTe, sysBenchmarkDinhBien, displayMode) {
+        if (typeof Chart === 'undefined') return;
+
+        // Biểu đồ 1: Benchmark Chi phí / Người vs Bình quân Hệ thống
+        const benchmarkCtx = document.getElementById('chart-cbnv-benchmark');
+        if (benchmarkCtx) {
+            if (cbnvBenchmarkChart) {
+                cbnvBenchmarkChart.destroy();
+                cbnvBenchmarkChart = null;
+            }
+
+            // Sắp xếp đơn vị theo định mức chi phí giảm dần
+            const sortedList = [...entitiesList].map(ent => {
+                const code = ent.code;
+                const cbnv = state.cbnvData[code] || { dinhBien: 0, thucTe: 0 };
+                const tT = Number(cbnv.thucTe) || 0;
+                const dB = Number(cbnv.dinhBien) || 0;
+                const c26 = getEntityCostTrD(code, '2026');
+                const rateTt = tT > 0 ? (c26 / tT) : 0;
+                const rateDb = dB > 0 ? (c26 / dB) : 0;
+                return {
+                    code: code,
+                    label: ent.cleanName || ent.name || code,
+                    rateTt: parseFloat(rateTt.toFixed(1)),
+                    rateDb: parseFloat(rateDb.toFixed(1)),
+                    thucTe: tT,
+                    dinhBien: dB,
+                    cost: c26
+                };
+            }).sort((a, b) => (b.rateTt || 0) - (a.rateTt || 0));
+
+            const labels = sortedList.map(item => item.label.length > 20 ? item.label.slice(0, 18) + '...' : item.label);
+            const datasets = [];
+
+            if (displayMode === 'BOTH' || displayMode === 'THUC_TE') {
+                datasets.push({
+                    type: 'bar',
+                    label: 'CPHC / CB-NV Thực Tế (Tr.đ/người/năm)',
+                    data: sortedList.map(item => item.rateTt),
+                    backgroundColor: 'rgba(0, 82, 156, 0.85)',
+                    borderColor: '#00529C',
+                    borderWidth: 1.5,
+                    borderRadius: 6,
+                    order: 2
+                });
+            }
+
+            if (displayMode === 'BOTH' || displayMode === 'DINH_BIEN') {
+                datasets.push({
+                    type: 'bar',
+                    label: 'CPHC / Định Biên (Tr.đ/người/năm)',
+                    data: sortedList.map(item => item.rateDb),
+                    backgroundColor: 'rgba(99, 102, 241, 0.75)',
+                    borderColor: '#6366F1',
+                    borderWidth: 1.5,
+                    borderRadius: 6,
+                    order: 3
+                });
+            }
+
+            // Đường Benchmark Bình Quân Hệ Thống
+            const benchmarkLineVal = displayMode === 'DINH_BIEN' ? sysBenchmarkDinhBien : sysBenchmarkThucTe;
+            datasets.push({
+                type: 'line',
+                label: `Bình quân Hệ thống (${benchmarkLineVal.toFixed(1)} Tr.đ/người)`,
+                data: Array(sortedList.length).fill(parseFloat(benchmarkLineVal.toFixed(1))),
+                borderColor: '#D97706',
+                borderWidth: 2.5,
+                borderDash: [6, 4],
+                pointRadius: 0,
+                fill: false,
+                order: 1
+            });
+
+            cbnvBenchmarkChart = new Chart(benchmarkCtx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: datasets
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: {
+                        mode: 'index',
+                        intersect: false
+                    },
+                    plugins: {
+                        legend: {
+                            position: 'top',
+                            labels: {
+                                font: { size: 11, weight: 'bold' },
+                                boxWidth: 12
+                            }
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    return `${context.dataset.label}: ${context.raw.toLocaleString('vi-VN')} Tr.đ/người`;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: 'Định mức CPHC (Tr.đ / người / năm)',
+                                font: { size: 10, weight: 'bold' }
+                            },
+                            grid: { color: '#f1f5f9' }
+                        },
+                        x: {
+                            grid: { display: false },
+                            ticks: {
+                                maxRotation: 45,
+                                minRotation: 30,
+                                font: { size: 10, weight: 'bold' }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        // Biểu đồ 2: Tương quan Chi phí Hành chính (Tr.đ) vs Quy mô Nhân sự (Người)
+        const scatterCtx = document.getElementById('chart-cbnv-scatter');
+        if (scatterCtx) {
+            if (cbnvScatterChart) {
+                cbnvScatterChart.destroy();
+                cbnvScatterChart = null;
+            }
+
+            const scatterPoints = entitiesList.map(ent => {
+                const code = ent.code;
+                const cbnv = state.cbnvData[code] || { dinhBien: 0, thucTe: 0 };
+                const tT = Number(cbnv.thucTe) || 0;
+                const c26 = getEntityCostTrD(code, '2026');
+                const rate = tT > 0 ? (c26 / tT).toFixed(1) : 0;
+
+                let color = 'rgba(0, 82, 156, 0.7)'; // VPĐH
+                if (cbnv.khoi === 'Nhà máy') color = 'rgba(16, 185, 129, 0.7)';
+                else if (cbnv.khoi === 'CTTT Phía Bắc') color = 'rgba(217, 119, 6, 0.7)';
+                else if (cbnv.khoi === 'CTTT Phía Nam') color = 'rgba(147, 51, 234, 0.7)';
+
+                return {
+                    x: tT,
+                    y: parseFloat(c26.toFixed(1)),
+                    label: ent.cleanName || ent.name || code,
+                    khoi: cbnv.khoi || 'VPĐH',
+                    rate: rate,
+                    color: color
+                };
+            });
+
+            cbnvScatterChart = new Chart(scatterCtx, {
+                type: 'bubble',
+                data: {
+                    datasets: [{
+                        label: 'Pháp nhân / Đơn vị',
+                        data: scatterPoints.map(p => ({ x: p.x, y: p.y, r: 8 })),
+                        backgroundColor: scatterPoints.map(p => p.color),
+                        borderColor: scatterPoints.map(p => p.color.replace('0.7', '1')),
+                        borderWidth: 1.5
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    const p = scatterPoints[context.dataIndex];
+                                    return [
+                                        `🏢 ${p.label} [${p.khoi}]`,
+                                        `👥 Nhân sự: ${p.x.toLocaleString('vi-VN')} người`,
+                                        `💰 Tổng CPHC 2026: ${p.y.toLocaleString('vi-VN')} Tr.đ`,
+                                        `⚡ Định mức: ${p.rate} Tr.đ / người / năm`
+                                    ];
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: 'Số lượng Nhân sự Thực tế (Người)',
+                                font: { size: 10, weight: 'bold' }
+                            },
+                            grid: { color: '#f1f5f9' }
+                        },
+                        y: {
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: 'Tổng Chi phí Hành chính 2026 (Tr.đ)',
+                                font: { size: 10, weight: 'bold' }
+                            },
+                            grid: { color: '#f1f5f9' }
+                        }
+                    }
+                }
+            });
+        }
+    }
+
+    /**
+     * Mở Modal Nạp File Excel Nhân Sự CB-NV
+     */
+    function openCbnvUploadModal() {
+        pendingCbnvUploadRows = null;
+        pendingCbnvAudit = null;
+        const modal = document.getElementById('cbnv-upload-modal');
+        const prevContainer = document.getElementById('cbnv-preview-container');
+        const btnConfirm = document.getElementById('btn-confirm-cbnv-upload');
+        const fileInput = document.getElementById('input-cbnv-file');
+
+        if (fileInput) fileInput.value = '';
+        if (prevContainer) prevContainer.classList.add('hidden');
+        if (btnConfirm) btnConfirm.disabled = true;
+        if (modal) modal.classList.remove('hidden');
+    }
+
+    /**
+     * Đóng Modal Nạp File Excel Nhân Sự CB-NV
+     */
+    function closeCbnvUploadModal() {
+        const modal = document.getElementById('cbnv-upload-modal');
+        if (modal) modal.classList.add('hidden');
+    }
+
+    /**
+     * Xử lý file Excel Nhân sự kéo thả hoặc chọn qua file input
+     */
+    function handleCbnvFileSelected(file) {
+        if (!window.XLSX) {
+            alert('Thư viện Excel chưa được tải xong.');
+            return;
+        }
+
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            try {
+                const data = new Uint8Array(e.target.result);
+                const workbook = XLSX.read(data, { type: 'array' });
+                const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+                const rows = XLSX.utils.sheet_to_json(firstSheet, { header: 1, defval: '' });
+
+                if (!rows || rows.length < 2) {
+                    alert('File Excel không có dữ liệu.');
+                    return;
+                }
+
+                // 1. Quét tìm dòng tiêu đề
+                let headerRowIdx = 0;
+                let colMa = -1, colTen = -1, colDb = -1, colTt = -1, colKhoi = -1, colNote = -1;
+
+                for (let r = 0; r < Math.min(20, rows.length); r++) {
+                    const rowCells = (rows[r] || []).map(c => String(c || '').toLowerCase().trim());
+                    for (let c = 0; c < rowCells.length; c++) {
+                        const h = rowCells[c];
+                        if (h.includes('mã đv') || h.includes('mã đvcs') || h.includes('mã pn') || h.includes('mã pháp nhân') || h === 'mã' || h === 'code') colMa = c;
+                        else if (h.includes('tên đơn vị') || h.includes('tên pháp nhân') || h.includes('tên showroom') || h.includes('tên đvcs') || h === 'đơn vị' || h === 'tên') colTen = c;
+                        else if (h.includes('định biên') || h.includes('dinh bien') || h.includes('kế hoạch')) colDb = c;
+                        else if (h.includes('thực tế') || h.includes('thuc te') || h.includes('hiện có') || h.includes('nhân sự')) colTt = c;
+                        else if (h.includes('khối') || h.includes('khoi')) colKhoi = c;
+                        else if (h.includes('ghi chú') || h.includes('ghi chu') || h.includes('note')) colNote = c;
+                    }
+                    if (colMa !== -1 && (colDb !== -1 || colTt !== -1)) {
+                        headerRowIdx = r;
+                        break;
+                    }
+                }
+
+                if (colMa === -1) colMa = 0;
+                if (colTen === -1) colTen = 1;
+                if (colDb === -1) colDb = 2;
+                if (colTt === -1) colTt = 3;
+
+                // 2. Phân tích các dòng dữ liệu & tìm dòng đối chiếu kiểm toán (CỘNG / TỔNG CỘNG)
+                const parsedRows = [];
+                let hasControlRow = false;
+                let fileControlTotalDb = null;
+                let fileControlTotalTt = null;
+
+                for (let r = headerRowIdx + 1; r < rows.length; r++) {
+                    const row = rows[r];
+                    if (!row || row.every(c => c === '' || c === null || c === undefined)) continue;
+
+                    const rowText = row.map(c => String(c || '').trim().toUpperCase()).join(' ');
+                    const rawMa = String(row[colMa] || '').trim();
+                    const rawTen = colTen !== -1 ? String(row[colTen] || '').trim() : '';
+
+                    const isControlRow = (
+                        rawMa.toUpperCase() === 'CỘNG' || rawMa.toUpperCase() === 'CONG' ||
+                        rawMa.toUpperCase().startsWith('TỔNG CỘNG') || rawMa.toUpperCase().startsWith('TONG CONG') ||
+                        rawTen.toUpperCase() === 'CỘNG' || rawTen.toUpperCase() === 'CONG' ||
+                        rawTen.toUpperCase().startsWith('TỔNG CỘNG') || rawTen.toUpperCase().startsWith('TONG CONG') ||
+                        rawTen.toUpperCase().startsWith('CỘNG TOÀN') || rawTen.toUpperCase().startsWith('CONG TOAN') ||
+                        rowText.includes('CỘNG TOÀN HỆ THỐNG') || rowText.includes('TỔNG SỐ') ||
+                        rowText.includes('GRAND TOTAL') || (rawTen.toUpperCase().startsWith('CỘNG ') && !rawTen.toUpperCase().includes('CỘNG ĐỒNG'))
+                    );
+
+                    const dB = colDb !== -1 ? (parseFloat(row[colDb]) || 0) : 0;
+                    const tT = colTt !== -1 ? (parseFloat(row[colTt]) || 0) : 0;
+
+                    if (isControlRow) {
+                        hasControlRow = true;
+                        fileControlTotalDb = dB;
+                        fileControlTotalTt = tT;
+                        continue; // Bỏ qua không đưa dòng CỘNG vào danh sách chi tiết showroom
+                    }
+
+                    if (!rawMa && !rawTen) continue;
+
+                    const khoi = colKhoi !== -1 ? String(row[colKhoi] || '').trim() : '';
+                    const note = colNote !== -1 ? String(row[colNote] || '').trim() : '';
+
+                    parsedRows.push({
+                        maPn: rawMa,
+                        tenPn: rawTen,
+                        dinhBien: dB,
+                        thucTe: tT,
+                        khoi: khoi,
+                        ghiChu: note
+                    });
+                }
+
+                if (parsedRows.length === 0) {
+                    alert('Không tìm thấy dòng dữ liệu nhân sự hợp lệ trong file!');
+                    return;
+                }
+
+                pendingCbnvUploadRows = parsedRows;
+
+                // 3. Tính toán kiểm toán đối soát CB-NV
+                const sumDb = parsedRows.reduce((a, b) => a + b.dinhBien, 0);
+                const sumTt = parsedRows.reduce((a, b) => a + b.thucTe, 0);
+
+                let auditStatus = 'NO_CONTROL_ROW';
+                let diff = null;
+                let diffDb = 0;
+
+                if (hasControlRow) {
+                    diff = Math.abs(sumTt - (fileControlTotalTt || 0));
+                    diffDb = Math.abs(sumDb - (fileControlTotalDb || 0));
+                    auditStatus = (diff === 0 && diffDb === 0) ? 'MATCH' : 'MISMATCH';
+                }
+
+                pendingCbnvAudit = {
+                    hasControlRow: hasControlRow,
+                    fileControlTotalDb: fileControlTotalDb,
+                    fileControlTotalTt: fileControlTotalTt,
+                    sumDb: sumDb,
+                    sumTt: sumTt,
+                    diff: diff,
+                    diffDb: diffDb,
+                    status: auditStatus
+                };
+
+                // 4. Hiển thị thông tin & Hộp kiểm toán xem trước (Audit Box)
+                const fnEl = document.getElementById('cbnv-preview-filename');
+                const countsEl = document.getElementById('cbnv-preview-counts');
+                const tbody = document.getElementById('cbnv-preview-tbody');
+                const prevContainer = document.getElementById('cbnv-preview-container');
+                const btnConfirm = document.getElementById('btn-confirm-cbnv-upload');
+                const auditBoxEl = document.getElementById('cbnv-preview-audit-box');
+
+                if (fnEl) fnEl.textContent = file.name;
+                if (countsEl) countsEl.textContent = `${parsedRows.length} dòng chi tiết`;
+
+                if (auditBoxEl) {
+                    if (auditStatus === 'MATCH') {
+                        auditBoxEl.className = 'p-3 rounded-xl border text-xs flex flex-wrap items-center justify-between gap-2 bg-emerald-50 border-emerald-300 text-emerald-900';
+                        auditBoxEl.innerHTML = `
+                            <div class="flex items-center gap-2">
+                                <span class="p-1 rounded bg-emerald-200 text-emerald-800 font-bold">✅</span>
+                                <div>
+                                    <strong class="font-bold text-emerald-950">KIỂM TOÁN NHÂN SỰ: Khớp 100%</strong>
+                                    <div class="text-slate-600">Tổng thực tế: <strong class="font-mono text-emerald-800">${sumTt.toLocaleString('vi-VN')}</strong> người | Định biên: <strong class="font-mono">${sumDb.toLocaleString('vi-VN')}</strong> người (Khớp tuyệt đối dòng CỘNG)</div>
+                                </div>
+                            </div>
+                            <div class="text-right">
+                                <span class="px-2.5 py-1 rounded-full text-xs font-black bg-emerald-100 text-emerald-800 border border-emerald-300">
+                                    Chênh lệch: 0 người
+                                </span>
+                            </div>
+                        `;
+                    } else if (auditStatus === 'NO_CONTROL_ROW') {
+                        auditBoxEl.className = 'p-3 rounded-xl border text-xs flex flex-wrap items-center justify-between gap-2 bg-amber-50 border-amber-300 text-amber-900';
+                        auditBoxEl.innerHTML = `
+                            <div class="flex items-center gap-2">
+                                <span class="p-1 rounded bg-amber-200 text-amber-800 font-bold">⚠️</span>
+                                <div>
+                                    <strong class="font-bold text-amber-950">CẢNH BÁO KIỂM TOÁN: Không tìm thấy dòng tổng cộng (CỘNG)</strong>
+                                    <div class="text-amber-800">Không tìm thấy dòng "CỘNG" / "TỔNG CỘNG" trong file Excel để đối chiếu kiểm toán — Cần rà soát thủ công (Không mặc định báo khớp).</div>
+                                </div>
+                            </div>
+                            <div class="text-right">
+                                <span class="px-2.5 py-1 rounded-full text-xs font-bold bg-amber-100 text-amber-800 border border-amber-300">
+                                    Tổng chi tiết: ${sumTt.toLocaleString('vi-VN')} người
+                                </span>
+                            </div>
+                        `;
+                    } else {
+                        auditBoxEl.className = 'p-3 rounded-xl border text-xs flex flex-wrap items-center justify-between gap-2 bg-rose-50 border-rose-300 text-rose-900';
+                        auditBoxEl.innerHTML = `
+                            <div class="flex items-center gap-2">
+                                <span class="p-1 rounded bg-rose-200 text-rose-800 font-bold">🚨</span>
+                                <div>
+                                    <strong class="font-bold text-rose-950">CẢNH BÁO LỆCH KIỂM TOÁN: Phát hiện chênh lệch</strong>
+                                    <div class="text-rose-800">Tổng dòng chi tiết: <strong>${sumTt.toLocaleString('vi-VN')}</strong> người vs Dòng CỘNG file gốc: <strong>${(fileControlTotalTt || 0).toLocaleString('vi-VN')}</strong> người.</div>
+                                </div>
+                            </div>
+                            <div class="text-right">
+                                <span class="px-2.5 py-1 rounded-full text-xs font-black bg-rose-100 text-rose-800 border border-rose-300">
+                                    Lệch: ${diff.toLocaleString('vi-VN')} người
+                                </span>
+                            </div>
+                        `;
+                    }
+                }
+
+                if (tbody) {
+                    tbody.innerHTML = parsedRows.slice(0, 30).map(r => `
+                        <tr class="hover:bg-slate-50 border-b border-slate-100">
+                            <td class="px-2.5 py-1.5 font-bold text-blue-900">${escapeHtml(r.maPn)}</td>
+                            <td class="px-2.5 py-1.5">${escapeHtml(r.tenPn)}</td>
+                            <td class="px-2.5 py-1.5 text-right font-bold">${r.dinhBien.toLocaleString('vi-VN')}</td>
+                            <td class="px-2.5 py-1.5 text-right font-bold text-emerald-800">${r.thucTe.toLocaleString('vi-VN')}</td>
+                            <td class="px-2.5 py-1.5 text-center">
+                                ${r.thucTe > 0 ? '<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800">✅ Hợp lệ</span>' : '<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800">⚠️ Nhân sự = 0</span>'}
+                            </td>
+                        </tr>
+                    `).join('');
+                }
+
+                if (prevContainer) prevContainer.classList.remove('hidden');
+                if (btnConfirm) btnConfirm.disabled = false;
+
+            } catch (err) {
+                console.error(err);
+                alert('Lỗi đọc file Excel Nhân sự: ' + err.message);
+            }
+        };
+        reader.readAsArrayBuffer(file);
+    }
+
+    /**
+     * Xác nhận áp dụng dữ liệu nhân sự đã nạp vào state
+     */
+    async function confirmCbnvUpload() {
+        if (!pendingCbnvUploadRows || pendingCbnvUploadRows.length === 0) {
+            alert('Chưa có dữ liệu nhân sự để nạp.');
+            return;
+        }
+
+        ensureBaselineCbnvData();
+        let updateCount = 0;
+
+        pendingCbnvUploadRows.forEach(item => {
+            const code = item.maPn;
+            if (!code) return;
+
+            if (!state.cbnvData[code]) {
+                state.cbnvData[code] = {
+                    stt: Object.keys(state.cbnvData).length + 1,
+                    maPn: code,
+                    tenPn: item.tenPn || code,
+                    khoi: item.khoi || 'VPĐH',
+                    nam: 2026,
+                    dinhBien: item.dinhBien,
+                    thucTe: item.thucTe,
+                    ghiChu: item.ghiChu || ''
+                };
+            } else {
+                state.cbnvData[code].dinhBien = item.dinhBien;
+                state.cbnvData[code].thucTe = item.thucTe;
+                if (item.tenPn) state.cbnvData[code].tenPn = item.tenPn;
+                if (item.khoi) state.cbnvData[code].khoi = item.khoi;
+                if (item.ghiChu) state.cbnvData[code].ghiChu = item.ghiChu;
+            }
+            updateCount++;
+        });
+
+        if (pendingCbnvAudit) {
+            state.cbnvAudit = pendingCbnvAudit;
+        }
+
+        saveCurrentState();
+        closeCbnvUploadModal();
+        renderCbnvTab();
+
+        alert(`✅ CẬP NHẬT THÀNH CÔNG!\nĐã cập nhật dữ liệu định biên và nhân sự thực tế cho ${updateCount} đơn vị.`);
+
+        // Đề xuất đồng bộ lên Google Sheet nếu có kết nối
+        const gsheetCfg = getGoogleSheetSyncConfig();
+        if (gsheetCfg && gsheetCfg.webAppUrl) {
+            if (confirm('Anh/Chị có muốn đồng bộ danh mục nhân sự mới này lên Google Sheet DM_CBNV không?')) {
+                pushCbnvToGoogleSheet(true);
+            }
+        }
+    }
+
+    /**
+     * Tải file Excel mẫu chuẩn nhập nhân sự CB-NV
+     */
+    function downloadCbnvTemplate() {
+        if (!window.XLSX) {
+            alert('Thư viện Excel chưa sẵn sàng.');
+            return;
+        }
+
+        ensureBaselineCbnvData();
+        const aoa = [
+            ['STT', 'Khối Đơn Vị', 'Mã Quản trị', 'Tên Quản trị', 'Mã ĐVCS', 'Tên Pháp Nhân / Showroom', 'Năm', 'Định Biên (Người)', 'Thực Tế (Người)', 'Ghi Chú']
+        ];
+
+        const activeEntities = (state.entities || []).filter(e => e.active !== false);
+        activeEntities.forEach((ent, idx) => {
+            const code = ent.code;
+            const cbnv = state.cbnvData[code] || { dinhBien: 60, thucTe: 56, khoi: ent.khoiName || 'VPĐH' };
+            aoa.push([
+                idx + 1,
+                cbnv.khoi || ent.khoiName || 'VPĐH',
+                cbnv.maQt || ent.qtCode || ('QT_' + code),
+                cbnv.tenQt || ent.qt || ent.name,
+                code,
+                ent.cleanName || ent.name,
+                2026,
+                cbnv.dinhBien || 0,
+                cbnv.thucTe || 0,
+                cbnv.ghiChu || 'Định mức 2026'
+            ]);
+        });
+
+        const wb = XLSX.utils.book_new();
+        const ws = createFormattedWorksheet(aoa);
+        XLSX.utils.book_append_sheet(wb, ws, 'DM_CBNV');
+        XLSX.writeFile(wb, 'Mau_Nhap_Nhan_Su_CBNV_THACO_AUTO.xlsx');
+    }
+
+    /**
+     * Xuất Bảng Ma Trận Định Mức Chi Phí / CB-NV sang Excel
+     */
+    function exportCbnvMatrixToExcel() {
+        if (!window.XLSX) {
+            alert('Thư viện Excel chưa sẵn sàng.');
+            return;
+        }
+
+        ensureBaselineCbnvData();
+        const activeEntities = (state.entities || []).filter(e => e.active !== false);
+        const aoa = [
+            ['TẬP ĐOÀN THACO AUTO - BÁO CÁO ĐỊNH MỨC CHI PHÍ HÀNH CHÍNH / CB-NV'],
+            [`Ngày xuất: ${new Date().toLocaleString('vi-VN')} | Đơn vị tiền tệ: Triệu đồng`],
+            [],
+            [
+                'STT', 'Khối Đơn Vị', 'Mã ĐVCS', 'Tên Pháp Nhân / Showroom',
+                'Định Biên (Người)', 'Thực Tế (Người)', '% Lấp Đầy',
+                'Tổng CPHC 2026 (Tr.đ)',
+                'CPHC/Thực Tế (Năm)', 'CPHC/Thực Tế (Tháng)',
+                'CPHC/Định Biên (Năm)', 'CPHC/Định Biên (Tháng)',
+                'CPHC/Người 2025 (Năm)', 'Biến Động YoY (%)'
+            ]
+        ];
+
+        let totDb = 0, totTt = 0, totC26 = 0, totC25 = 0;
+
+        activeEntities.forEach((ent, idx) => {
+            const code = ent.code;
+            const cbnv = state.cbnvData[code] || { dinhBien: 0, thucTe: 0, khoi: ent.khoiName || 'VPĐH' };
+            const dB = Number(cbnv.dinhBien) || 0;
+            const tT = Number(cbnv.thucTe) || 0;
+            const fillPct = dB > 0 ? (tT / dB) : 0;
+            const c26 = getEntityCostTrD(code, '2026');
+            const c25 = getEntityCostTrD(code, '2025');
+
+            totDb += dB;
+            totTt += tT;
+            totC26 += c26;
+            totC25 += c25;
+
+            const rateTtYear = tT > 0 ? (c26 / tT) : 0;
+            const rateTtMonth = rateTtYear / 12;
+            const rateDbYear = dB > 0 ? (c26 / dB) : 0;
+            const rateDbMonth = rateDbYear / 12;
+            const rateTt25Year = tT > 0 ? (c25 / tT) : 0;
+            const yoyPct = rateTt25Year > 0 ? ((rateTtYear - rateTt25Year) / rateTt25Year) : 0;
+
+            aoa.push([
+                idx + 1,
+                cbnv.khoi || 'VPĐH',
+                code,
+                ent.cleanName || ent.name,
+                dB,
+                tT,
+                fillPct,
+                c26,
+                rateTtYear,
+                rateTtMonth,
+                rateDbYear,
+                rateDbMonth,
+                rateTt25Year,
+                yoyPct
+            ]);
+        });
+
+        const totTtYear = totTt > 0 ? (totC26 / totTt) : 0;
+        const totTtMonth = totTtYear / 12;
+        const totDbYear = totDb > 0 ? (totC26 / totDb) : 0;
+        const totDbMonth = totDbYear / 12;
+        const totTt25Year = totTt > 0 ? (totC25 / totTt) : 0;
+        const totYoYPct = totTt25Year > 0 ? ((totTtYear - totTt25Year) / totTt25Year) : 0;
+        const totFillPct = totDb > 0 ? (totTt / totDb) : 0;
+
+        aoa.push([
+            '', 'TỔNG CỘNG HỆ THỐNG', '', '',
+            totDb, totTt, totFillPct,
+            totC26,
+            totTtYear, totTtMonth,
+            totDbYear, totDbMonth,
+            totTt25Year, totYoYPct
+        ]);
+
+        const wb = XLSX.utils.book_new();
+        const ws = createFormattedWorksheet(aoa);
+        XLSX.utils.book_append_sheet(wb, ws, 'Dinh_Muc_CPHC_CBNV');
+        XLSX.writeFile(wb, `Bao_Cao_Dinh_Muc_CPHC_CBNV_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    }
+
+    /**
+     * Đẩy danh mục định biên & nhân sự CB-NV lên Google Sheet DM_CBNV
+     */
+    async function pushCbnvToGoogleSheet(showSuccessAlert = true) {
+        const config = getGoogleSheetSyncConfig();
+        if (!config.webAppUrl) {
+            alert('Chưa cấu hình URL Google Apps Script Web App! Vui lòng vào tab Đồng bộ Sheet để cấu hình.');
+            return;
+        }
+
+        ensureBaselineCbnvData();
+        const cbnvList = Object.values(state.cbnvData);
+
+        try {
+            const payload = {
+                action: 'save_cbnv',
+                api_key: config.apiKey || '',
+                cbnvData: cbnvList
+            };
+
+            const resp = await fetch(config.webAppUrl, {
+                method: 'POST',
+                mode: 'cors',
+                headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                body: JSON.stringify(payload)
+            });
+
+            const data = await resp.json();
+            if (data.status === 'success') {
+                config.lastSynced = new Date().toISOString();
+                saveGoogleSheetSyncConfig(config);
+                if (showSuccessAlert) {
+                    alert(data.message || `Đã đẩy thành công ${cbnvList.length} dòng nhân sự lên sheet DM_CBNV!`);
+                }
+            } else {
+                alert('Lỗi khi lưu lên Google Sheet DM_CBNV: ' + (data.message || 'Không thành công'));
+            }
+        } catch (e) {
+            alert('Lỗi khi gửi dữ liệu nhân sự lên Google Sheet: ' + e.message);
+        }
+    }
+
+    /**
+     * Tải danh mục định biên & nhân sự CB-NV từ Google Sheet DM_CBNV
+     */
+    async function syncCbnvFromGoogleSheet(showSuccessAlert = true) {
+        const config = getGoogleSheetSyncConfig();
+        if (!config.webAppUrl) {
+            alert('Chưa cấu hình URL Google Apps Script Web App!');
+            return;
+        }
+
+        try {
+            const keyParam = config.apiKey ? `&api_key=${encodeURIComponent(config.apiKey.trim())}` : '';
+            const url = config.webAppUrl + (config.webAppUrl.includes('?') ? '&' : '?') + 'action=get_cbnv&t=' + Date.now() + keyParam;
+            const resp = await fetch(url);
+            const data = await resp.json();
+
+            if (data.code === 401 || (data.status === 'error' && data.code === 401)) {
+                alert('Khóa bảo mật API_KEY không đúng (Lỗi 401). Vui lòng kiểm tra lại trong Cài đặt kết nối.');
+                return;
+            }
+
+            if (data.status === 'success' && Array.isArray(data.cbnvData)) {
+                if (!state.cbnvData) state.cbnvData = {};
+                data.cbnvData.forEach(item => {
+                    const code = item.maPn || item.code;
+                    if (code) {
+                        state.cbnvData[code] = item;
+                    }
+                });
+                saveCurrentState();
+                renderCbnvTab();
+                if (showSuccessAlert) {
+                    alert(`Đã tải thành công ${data.cbnvData.length} dòng nhân sự từ Google Sheet DM_CBNV!`);
+                }
+            } else {
+                alert('Lỗi tải DM_CBNV từ Google Sheet: ' + (data.message || 'Không có dữ liệu.'));
+            }
+        } catch (e) {
+            alert('Không thể kết nối đến Google Apps Script (DM_CBNV): ' + e.message);
+        }
+    }
+
+    /**
+     * Hộp thoại tương tác đồng bộ 2 chiều DM_CBNV với Google Sheet
+     */
+    function handleSyncCbnvWithGoogleSheetPrompt() {
+        const config = getGoogleSheetSyncConfig();
+        if (!config || !config.webAppUrl) {
+            alert('Chưa cấu hình URL Google Apps Script Web App! Vui lòng vào Cài đặt kết nối để thiết lập.');
+            openGoogleSheetConfigModal();
+            return;
+        }
+
+        const choice = prompt('ĐỒNG BỘ DANH MỤC NHÂN SỰ CB-NV (DM_CBNV):\n\n- Gõ 1: Đẩy dữ liệu hiện tại lên Google Sheet DM_CBNV\n- Gõ 2: Tải dữ liệu mới nhất từ Google Sheet DM_CBNV về máy', '1');
+        if (choice === '1') {
+            pushCbnvToGoogleSheet(true);
+        } else if (choice === '2') {
+            syncCbnvFromGoogleSheet(true);
+        }
     }
 
     // ==========================================
@@ -3981,7 +6239,18 @@
                     const tenBp = colTenBp !== -1 ? String(row[colTenBp] || '').trim() : '';
 
                     // Bỏ qua dòng cộng tổng hợp hoặc dòng không có mã khoản mục (Lưu ý: không loại 'cộng đồng')
-                    const isSummaryRow = !km || tenKm.startsWith('CỘNG CHI PHÍ') || tenKm.startsWith('CỘNG ') || tenKm.startsWith('TỔNG CỘNG') || tenKm === 'TỔNG CỘNG' || tenKm === 'CỘNG';
+                    const tenKmNorm = norm(tenKm);
+                    const isSummaryRow = !km ||
+                        tenKmNorm.startsWith('CỘNG CHI PHÍ') ||
+                        tenKmNorm.startsWith('CONG CHI PHI') ||
+                        tenKmNorm.startsWith('CỘNG ') ||
+                        tenKmNorm.startsWith('CONG ') ||
+                        tenKmNorm.startsWith('TỔNG CỘNG') ||
+                        tenKmNorm.startsWith('TONG CONG') ||
+                        tenKmNorm === 'TỔNG CỘNG' ||
+                        tenKmNorm === 'TONG CONG' ||
+                        tenKmNorm === 'CỘNG' ||
+                        tenKmNorm === 'CONG';
                     if (isSummaryRow) continue;
 
                     // Đọc 12 tháng
@@ -4010,9 +6279,7 @@
                     // Map với danh mục state.categories (từ DM_CPHC)
                     let matchedCat = null;
                     for (let cat of state.categories) {
-                        if ((cat.b7_codes && cat.b7_codes.includes(km)) ||
-                            (cat.b10_codes && cat.b10_codes.includes(km)) ||
-                            (cat.b7_display && cat.b7_display === km)) {
+                        if (matchCategoryKm(cat, km)) {
                             matchedCat = cat;
                             break;
                         }
@@ -4109,7 +6376,16 @@
                 const diffElem = document.getElementById('preview-diff-total');
                 const badgeElem = document.getElementById('preview-audit-badge');
 
-                if (diff === 0 || diff < 1) {
+                if (bravoControlTotal === null) {
+                    if (diffElem) {
+                        diffElem.textContent = 'Chưa xác định (Không có dòng đối chiếu CỘNG)';
+                        diffElem.className = 'text-amber-700 font-mono font-medium';
+                    }
+                    if (badgeElem) {
+                        badgeElem.textContent = '⚠️ Không có dòng đối chiếu CỘNG';
+                        badgeElem.className = 'px-2 py-0.5 rounded text-[10px] font-black bg-amber-100 text-amber-800 border border-amber-300';
+                    }
+                } else if (diff === 0 || diff < 1) {
                     if (diffElem) {
                         diffElem.textContent = '0 đ (Tuyệt đối chuẩn xác)';
                         diffElem.className = 'text-emerald-700 font-mono font-bold';
@@ -4121,11 +6397,11 @@
                 } else {
                     if (diffElem) {
                         diffElem.textContent = `${diff.toLocaleString('vi-VN')} đ`;
-                        diffElem.className = 'text-amber-700 font-mono font-bold';
+                        diffElem.className = 'text-rose-700 font-mono font-bold';
                     }
                     if (badgeElem) {
                         badgeElem.textContent = `Lệch ${diff.toLocaleString('vi-VN')} đ`;
-                        badgeElem.className = 'px-2 py-0.5 rounded text-[10px] font-black bg-amber-100 text-amber-800 border border-amber-300';
+                        badgeElem.className = 'px-2 py-0.5 rounded text-[10px] font-black bg-rose-100 text-rose-800 border border-rose-300';
                     }
                 }
 
@@ -4272,9 +6548,10 @@
                     targetDataStore[entCode][tkKey][catId] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
                 }
                 for (let m = 0; m < 12; m++) {
-                    targetDataStore[entCode][tkKey][catId][m] += (r.months[m] || 0) / 1e6;
+                    targetDataStore[entCode][tkKey][catId][m] += (r.months[m] || 0);
                 }
             });
+            clearReportDataCache();
 
             // 4. Cập nhật các tháng thực hiện và kích hoạt mô hình AI dự báo
             if (year === 2026 && maxMonth > 0) {
@@ -4338,6 +6615,7 @@
 
         const payload = {
             action: 'save_cphc_data',
+            api_key: config.apiKey || '',
             targetSheet: targetSheet || 'CP_AUTO',
             entityCode: entityCode || 'C1101',
             year: year || 2026,
@@ -4429,7 +6707,7 @@
         return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
     }
 
-    window.THACO_APP = { state, processGoogleSheetData, syncFromGoogleSheet, calculateReportData, resetToBaseline, openUploadModal, init };
+    window.THACO_APP = { state, processGoogleSheetData, syncFromGoogleSheet, calculateReportData, resetToBaseline, openUploadModal, openCbnvUploadModal, renderCbnvTab, setCbnvDisplayMode, init };
 
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', init);

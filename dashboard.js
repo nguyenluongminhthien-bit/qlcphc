@@ -24,6 +24,14 @@
 
     // Semantic Professional Cost Group Icons
     const GROUP_ICONS = {
+        // 3 Nhóm Chi Phí Mới Hiện Tại
+        'Phục vụ hoạt động chung': '🏢',
+        'Phục vụ kinh doanh': '💼',
+        'Phục vụ CB-NV': '👥',
+        'Chi phí phục vụ hoạt động chung': '🏢',
+        'Chi phí phục vụ kinh doanh': '💼',
+        'Chi phí phục vụ CB-NV': '👥',
+        // Tương thích ngược với các tên nhóm cũ
         'Chi phí tiện ích văn phòng (5)': '📑',
         'Chi phí tiện ích văn phòng': '📑',
         'Chi phí mua sắm, sửa chữa CCDC, TSCĐ (2)': '🛠️',
@@ -33,21 +41,41 @@
         'Chi phí Công tác (5)': '✈️',
         'Chi phí Công tác': '✈️',
         'Chi phí Vận hành & Mặt bằng': '🏢',
-        'Chi phí phục vụ CB-NV': '🍱',
+        'Chi phí vận hành (10)': '🏢',
         'Chi phí khác': '⚖️',
-        'Chi phí khác & Quản trị': '⚖️'
+        'Chi phí khác & Quản trị': '⚖️',
+        'Chi phí khác & Khấu hao (3)': '⚖️'
     };
 
     function getGroupIcon(groupName) {
         if (!groupName) return '📑';
+
+        // 1. Ưu tiên lấy từ GroupIconManager hoặc LocalStorage nếu người dùng đã tùy chọn icon
+        if (window.GroupIconManager && typeof window.GroupIconManager.getIcon === 'function') {
+            const userIcon = window.GroupIconManager.getIcon(groupName);
+            if (userIcon) return userIcon;
+        }
+        try {
+            const savedIconsRaw = localStorage.getItem('THACO_CPHC_GROUP_ICONS');
+            if (savedIconsRaw) {
+                const parsed = JSON.parse(savedIconsRaw);
+                if (parsed && parsed[groupName]) return parsed[groupName];
+            }
+        } catch (e) { }
+
+        // 2. Tra cứu theo bảng tên nhóm chuẩn
         if (GROUP_ICONS[groupName]) return GROUP_ICONS[groupName];
+
+        // 3. Nhận diện thông minh theo từ khóa bản chất chi phí
         const lower = groupName.toLowerCase();
+        if (lower.includes('hoạt động chung') || lower.includes('hoat dong chung')) return '🏢';
+        if (lower.includes('kinh doanh') || lower.includes('bán hàng') || lower.includes('khách hàng')) return '💼';
+        if (lower.includes('cb-nv') || lower.includes('cbnv') || lower.includes('nhân viên') || lower.includes('cán bộ') || lower.includes('cơm') || lower.includes('ăn')) return '👥';
         if (lower.includes('tiện ích') || lower.includes('văn phòng phẩm')) return '📑';
         if (lower.includes('mua sắm') || lower.includes('sửa chữa') || lower.includes('ccdc') || lower.includes('tscđ')) return '🛠️';
         if (lower.includes('hội họp') || lower.includes('tiếp khách') || lower.includes('giao tế')) return '🤝';
         if (lower.includes('công tác') || lower.includes('lưu trú') || lower.includes('vé máy bay')) return '✈️';
         if (lower.includes('vận hành') || lower.includes('mặt bằng') || lower.includes('điện') || lower.includes('nước')) return '🏢';
-        if (lower.includes('cb-nv') || lower.includes('cbnv') || lower.includes('nhân viên') || lower.includes('cơm')) return '🍱';
         if (lower.includes('khác') || lower.includes('quản trị') || lower.includes('pháp lý') || lower.includes('kiểm toán')) return '⚖️';
         return '📑';
     }
@@ -304,7 +332,7 @@
                     <div class="flex flex-wrap items-center gap-2">
                         <!-- NÚT BẬT / TẮT XEM CHI TIẾT -->
                         <button id="dash-toggle-detail" class="px-3 py-1.5 rounded-lg font-bold text-xs flex items-center gap-1.5 transition-all bg-[#00529C] text-white shadow-sm border border-[#00529C]"
-                                title="Bật để xem 39 khoản mục chi tiết | Tắt để xem rút gọn 7 nhóm chi phí">
+                                title="Bật để xem các khoản mục chi tiết | Tắt để xem rút gọn các nhóm chi phí">
                             <span id="dash-detail-icon">👁️</span>
                             <span id="dash-detail-text">Xem Chi Tiết: BẬT</span>
                         </button>
@@ -424,6 +452,72 @@
                 </div>
             </div>
 
+            <!-- BẢNG ĐÁNH GIÁ KIỂM ĐỊNH ROLLING BACKTEST & ĐỘ TIN CẬY AI FORECAST (GIAI ĐOẠN 4) -->
+            <div id="dash-ai-backtest-panel" class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm hover:shadow-md transition-all mt-4">
+                <div class="flex flex-wrap items-center justify-between pb-3 border-b border-slate-100 gap-2 mb-3">
+                    <div class="flex items-center gap-2">
+                        <span class="p-1.5 rounded-lg bg-indigo-50 text-indigo-700 text-base">🤖</span>
+                        <div>
+                            <h3 class="text-xs font-bold text-[#00529C] uppercase tracking-wider flex items-center gap-1.5">
+                                <span>Kiểm định Mô hình AI Dự báo (Rolling Backtest & Sai số MAPE)</span>
+                                <span class="px-1.5 py-0.2 rounded text-[9px] font-black bg-indigo-100 text-indigo-800 border border-indigo-200">Giai đoạn 4</span>
+                            </h3>
+                            <p class="text-[11px] text-slate-500">
+                                Kiểm nghiệm ngược số liệu thực nghiệm: Sử dụng các tháng đầu kỳ để dự báo các tháng gần nhất đã phát sinh nhằm đo lường độ tin cậy của thuật toán.
+                            </p>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <span id="backtest-confidence-badge" class="px-2.5 py-1 rounded-full text-xs font-black bg-emerald-100 text-emerald-800 border border-emerald-300">
+                            Độ tin cậy: --%
+                        </span>
+                    </div>
+                </div>
+
+                <!-- 4 KPI Thống kê Backtest -->
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-4 text-xs">
+                    <div class="bg-slate-50 p-2.5 rounded-lg border border-slate-200">
+                        <div class="text-[10px] uppercase font-bold text-slate-500">Sai số bình quân (MAPE)</div>
+                        <div id="kpi-backtest-mape" class="text-base font-black text-emerald-700 font-mono mt-0.5">--%</div>
+                        <div class="text-[10px] text-slate-400 mt-0.5">Mục tiêu: &lt; 15% (Chuẩn mực dự báo)</div>
+                    </div>
+                    <div class="bg-slate-50 p-2.5 rounded-lg border border-slate-200">
+                        <div class="text-[10px] uppercase font-bold text-slate-500">Kỳ huấn luyện (Train)</div>
+                        <div id="kpi-backtest-train" class="text-base font-bold text-[#00529C] font-mono mt-0.5">T1 - T5</div>
+                        <div class="text-[10px] text-slate-400 mt-0.5">Dữ liệu gốc tính hệ số Run-rate</div>
+                    </div>
+                    <div class="bg-slate-50 p-2.5 rounded-lg border border-slate-200">
+                        <div class="text-[10px] uppercase font-bold text-slate-500">Kỳ kiểm nghiệm (Test)</div>
+                        <div id="kpi-backtest-test" class="text-base font-bold text-amber-700 font-mono mt-0.5">T6 - T7</div>
+                        <div class="text-[10px] text-slate-400 mt-0.5">Tháng thực nghiệm đối chiếu sai số</div>
+                    </div>
+                    <div class="bg-slate-50 p-2.5 rounded-lg border border-slate-200">
+                        <div class="text-[10px] uppercase font-bold text-slate-500">Mô hình toán học</div>
+                        <div class="text-xs font-bold text-indigo-900 mt-1">Multiplicative Run-rate</div>
+                        <div class="text-[10px] text-indigo-700 mt-0.5">Kết hợp trọng số mùa vụ 2024-2025</div>
+                    </div>
+                </div>
+
+                <!-- Bảng chi tiết đối chiếu Backtest -->
+                <div class="overflow-x-auto border border-slate-200 rounded-xl">
+                    <table class="w-full text-xs text-left text-slate-700">
+                        <thead class="bg-slate-100 text-slate-700 text-[11px] font-bold border-b border-slate-200 uppercase select-none">
+                            <tr>
+                                <th class="px-3 py-2">Kỳ kiểm định</th>
+                                <th class="px-3 py-2 text-right">Chi phí Thực tế 2026 (Tr.đ)</th>
+                                <th class="px-3 py-2 text-right">AI Dự báo Backtest (Tr.đ)</th>
+                                <th class="px-3 py-2 text-right">Sai số Tuyệt đối (Tr.đ)</th>
+                                <th class="px-3 py-2 text-right">Sai số Tương đối (%)</th>
+                                <th class="px-3 py-2 text-center">Đánh giá Độ chính xác</th>
+                            </tr>
+                        </thead>
+                        <tbody id="backtest-table-body" class="divide-y divide-slate-100 font-mono">
+                            <!-- Populated dynamically -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
             <!-- DRILL-DOWN MODAL -->
             <div id="dash-drilldown-modal" class="hidden fixed inset-0 z-50 overflow-y-auto bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4">
                 <div class="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-3xl w-full p-6 space-y-4 transform transition-all">
@@ -443,14 +537,16 @@
                         </div>
                         <div class="overflow-x-auto border border-slate-200 rounded-xl">
                             <table class="w-full text-xs text-left text-slate-700">
-                                <thead class="bg-[#00529C] text-white">
+                                <thead class="bg-[#00529C] text-white text-xs select-none">
                                     <tr>
                                         <th class="px-3 py-2">Mã ĐV</th>
                                         <th class="px-3 py-2">Tên Pháp Nhân / Đơn Vị</th>
-                                        <th class="px-3 py-2 text-right">2026 (Tr.đ)</th>
-                                        <th class="px-3 py-2 text-right">2025 (Tr.đ)</th>
-                                        <th class="px-3 py-2 text-right">2024 (Tr.đ)</th>
-                                        <th class="px-3 py-2 text-right">Tăng/Giảm YoY</th>
+                                        <th class="px-3 py-2 text-right font-bold text-amber-200">2026 (Tr.đ)</th>
+                                        <th class="px-3 py-2 text-right text-blue-100">2025 (Tr.đ)</th>
+                                        <th class="px-3 py-2 text-right text-purple-200">2024 (Tr.đ)</th>
+                                        <th class="px-3 py-2 text-right font-bold text-amber-300">2026 vs 2025</th>
+                                        <th class="px-3 py-2 text-right font-bold text-cyan-200">2026 vs 2024</th>
+                                        <th class="px-3 py-2 text-right font-bold text-indigo-200">2025 vs 2024</th>
                                     </tr>
                                 </thead>
                                 <tbody id="modal-drilldown-tbody" class="divide-y divide-slate-100">
@@ -499,8 +595,8 @@
                     btnToggleDetail.className = 'px-3 py-1.5 rounded-lg font-bold text-xs flex items-center gap-1.5 transition-all bg-amber-50 text-amber-900 border border-amber-300 shadow-sm hover:bg-amber-100';
                     if (iconDetail) iconDetail.textContent = '📑';
                     if (textDetail) textDetail.textContent = 'Xem Chi Tiết: TẮT (Chỉ Xem Nhóm)';
-                    if (titleElem) titleElem.textContent = '📊 Biểu Đồ Tổng Hợp Theo Các Nhóm Chi Phí (7 Nhóm Lớn)';
-                    if (descElem) descElem.textContent = 'Đang hiển thị 7 Nhóm chi phí tổng hợp cấp điều hành. Bấm nút để xem chi tiết 39 khoản mục con.';
+                    if (titleElem) titleElem.textContent = '📊 Biểu Đồ Tổng Hợp Theo Các Nhóm Chi Phí';
+                    if (descElem) descElem.textContent = 'Đang hiển thị các Nhóm chi phí tổng hợp cấp điều hành. Bấm nút để xem chi tiết từng khoản mục con.';
                     if (topTitle) topTitle.textContent = 'Nhóm Chi Phí Lớn Nhất';
                 }
                 renderMainHorizontalChart();
@@ -1062,7 +1158,9 @@
         if (el25) el25.textContent = `${Math.round(tot25).toLocaleString('vi-VN')} Tr.đ`;
         if (el26) el26.textContent = `${Math.round(tot26).toLocaleString('vi-VN')} Tr.đ`;
         if (elCount) {
-            elCount.textContent = dashState.showDetail ? `${rawRows.length} Khoản mục` : `7 Nhóm Chi Phí`;
+            const distinctGroups = new Set(rawRows.map(r => (r.category && r.category.group) || '').filter(Boolean));
+            const groupCount = distinctGroups.size || 3;
+            elCount.textContent = dashState.showDetail ? `${rawRows.length} Khoản mục` : `${groupCount} Nhóm Chi Phí`;
         }
 
         if (elGrowth) {
@@ -1966,6 +2064,27 @@
 
         let totalRow24 = 0, totalRow25 = 0, totalRow26 = 0;
 
+        const threshold = (app && app.state && app.state.yoyConfig && app.state.yoyConfig.thresholdPercent) || 20;
+
+        function renderYoYCell(vNew, vOld) {
+            if (!vOld || vOld <= 0) {
+                if (vNew > 0) return '<span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800">Mới</span>';
+                return '<span class="text-slate-400 font-mono text-xs">-</span>';
+            }
+            const diff = ((vNew - vOld) / vOld) * 100;
+            const sign = diff >= 0 ? '+' : '';
+            const txt = `${sign}${diff.toFixed(1)}%`;
+            if (Math.abs(diff) >= threshold) {
+                if (diff > 0) {
+                    return `<span class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-black bg-rose-100 text-rose-800 border border-rose-300">▲ ${txt} ⚠️</span>`;
+                } else {
+                    return `<span class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-black bg-emerald-100 text-emerald-800 border border-emerald-300">▼ ${txt}</span>`;
+                }
+            }
+            const color = diff > 0 ? 'text-amber-700' : (diff < 0 ? 'text-emerald-700' : 'text-slate-600');
+            return `<span class="font-bold font-mono text-xs ${color}">${txt}</span>`;
+        }
+
         entities.forEach(ent => {
             let e24 = 0, e25 = 0, e26 = 0;
 
@@ -1998,13 +2117,9 @@
             totalRow25 += e25;
             totalRow26 += e26;
 
-            let yoyHtml = '<span class="text-slate-400">-</span>';
-            if (e25 > 0) {
-                const diff = ((e26 - e25) / e25) * 100;
-                const sign = diff >= 0 ? '+' : '';
-                const color = diff > 0 ? 'text-amber-600' : 'text-emerald-600';
-                yoyHtml = `<span class="font-bold ${color}">${sign}${diff.toFixed(1)}%</span>`;
-            }
+            const yoy26_25 = renderYoYCell(e26, e25);
+            const yoy26_24 = renderYoYCell(e26, e24);
+            const yoy25_24 = renderYoYCell(e25, e24);
 
             const tr = document.createElement('tr');
             tr.className = 'hover:bg-slate-50 transition-colors';
@@ -2014,7 +2129,9 @@
                 <td class="px-3 py-2 text-right font-mono text-[#00529C] font-bold">${Math.round(e26).toLocaleString('vi-VN')}</td>
                 <td class="px-3 py-2 text-right font-mono text-sky-600">${Math.round(e25).toLocaleString('vi-VN')}</td>
                 <td class="px-3 py-2 text-right font-mono text-purple-700">${Math.round(e24).toLocaleString('vi-VN')}</td>
-                <td class="px-3 py-2 text-right font-mono">${yoyHtml}</td>
+                <td class="px-3 py-2 text-right font-mono">${yoy26_25}</td>
+                <td class="px-3 py-2 text-right font-mono">${yoy26_24}</td>
+                <td class="px-3 py-2 text-right font-mono">${yoy25_24}</td>
             `;
             tbody.appendChild(tr);
         });
@@ -2027,9 +2144,9 @@
             <td class="px-3 py-2 text-right font-mono text-[#00529C] font-bold">${Math.round(totalRow26).toLocaleString('vi-VN')}</td>
             <td class="px-3 py-2 text-right font-mono text-sky-600">${Math.round(totalRow25).toLocaleString('vi-VN')}</td>
             <td class="px-3 py-2 text-right font-mono text-purple-700">${Math.round(totalRow24).toLocaleString('vi-VN')}</td>
-            <td class="px-3 py-2 text-right font-mono">
-                ${totalRow25 > 0 ? `${(((totalRow26 - totalRow25) / totalRow25) * 100).toFixed(1)}%` : '-'}
-            </td>
+            <td class="px-3 py-2 text-right font-mono">${renderYoYCell(totalRow26, totalRow25)}</td>
+            <td class="px-3 py-2 text-right font-mono">${renderYoYCell(totalRow26, totalRow24)}</td>
+            <td class="px-3 py-2 text-right font-mono">${renderYoYCell(totalRow25, totalRow24)}</td>
         `;
         tbody.appendChild(totTr);
 
@@ -2089,7 +2206,8 @@
             });
         }
 
-        // 2. CHART: DIỄN BIẾN 12 THÁNG 2026 (Line: Thực tế vs AI)
+        // 2. CHART: DIỄN BIẾN 12 THÁNG 2026 (Line: Thực tế vs AI & Dải Cận Tự Tin CI)
+        const backtestRes = calculateRollingBacktest();
         const ctxTrend = document.getElementById('chart-monthly-trend');
         if (ctxTrend) {
             const m25 = Array(12).fill(0);
@@ -2101,42 +2219,82 @@
                 }
             });
 
+            const datasets = [
+                {
+                    label: 'Năm 2026 (Thực tế + AI)',
+                    data: m26.map(v => Math.round(v)),
+                    borderColor: '#00529C',
+                    backgroundColor: 'rgba(0, 82, 156, 0.15)',
+                    borderWidth: 3,
+                    fill: true,
+                    tension: 0.3
+                },
+                {
+                    label: 'Năm 2025 (Thực tế)',
+                    data: m25.map(v => Math.round(v)),
+                    borderColor: '#58a1e0',
+                    backgroundColor: 'rgba(88, 161, 224, 0.1)',
+                    borderWidth: 2,
+                    fill: false,
+                    tension: 0.3
+                }
+            ];
+
+            // Thêm dải biến động cận trên và cận dưới (Seasonal Variance CI) nếu có
+            if (backtestRes && backtestRes.bounds) {
+                const maxCI = Array(12).fill(null);
+                const minCI = Array(12).fill(null);
+                Object.keys(backtestRes.bounds).forEach(mStr => {
+                    const m = parseInt(mStr, 10);
+                    const b = backtestRes.bounds[m];
+                    if (b) {
+                        maxCI[m - 1] = Math.round(b.max);
+                        minCI[m - 1] = Math.round(b.min);
+                    }
+                });
+
+                datasets.push({
+                    label: 'Dải Cận trên (Max CI)',
+                    data: maxCI,
+                    borderColor: '#0284c7',
+                    borderDash: [5, 4],
+                    borderWidth: 1.5,
+                    pointRadius: 2.5,
+                    pointBackgroundColor: '#0284c7',
+                    fill: false,
+                    tension: 0.3
+                });
+
+                datasets.push({
+                    label: 'Dải Cận dưới (Min CI)',
+                    data: minCI,
+                    borderColor: '#6366f1',
+                    borderDash: [5, 4],
+                    borderWidth: 1.5,
+                    pointRadius: 2.5,
+                    pointBackgroundColor: '#6366f1',
+                    fill: false,
+                    tension: 0.3
+                });
+            }
+
             if (dashState.activeCharts.monthlyTrend) dashState.activeCharts.monthlyTrend.destroy();
             dashState.activeCharts.monthlyTrend = new Chart(ctxTrend, {
                 type: 'line',
                 data: {
                     labels: ['T01', 'T02', 'T03', 'T04', 'T05', 'T06', 'T07', 'T08', 'T09', 'T10', 'T11', 'T12'],
-                    datasets: [
-                        {
-                            label: 'Năm 2026 (Thực tế + AI)',
-                            data: m26.map(v => Math.round(v)),
-                            borderColor: '#00529C',
-                            backgroundColor: 'rgba(0, 82, 156, 0.2)',
-                            borderWidth: 3,
-                            fill: true,
-                            tension: 0.3
-                        },
-                        {
-                            label: 'Năm 2025 (Thực tế)',
-                            data: m25.map(v => Math.round(v)),
-                            borderColor: '#58a1e0',
-                            backgroundColor: 'rgba(88, 161, 224, 0.15)',
-                            borderWidth: 2,
-                            fill: false,
-                            tension: 0.3
-                        }
-                    ]
+                    datasets: datasets
                 },
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
                     plugins: {
-                        legend: { position: 'top', labels: { font: { size: 10, weight: 'bold' } } },
+                        legend: { position: 'top', labels: { font: { size: 9.5, weight: 'bold' } } },
                         tooltip: {
                             enabled: false,
                             external: renderChartExternalTooltip,
                             callbacks: {
-                                label: (c) => `  ${c.dataset.label}: ${c.raw.toLocaleString('vi-VN')} Tr.đ`
+                                label: (c) => `  ${c.dataset.label}: ${c.raw !== null ? c.raw.toLocaleString('vi-VN') + ' Tr.đ' : '-'}`
                             }
                         }
                     }
@@ -2257,6 +2415,182 @@
                 }
             });
         }
+
+        // Cập nhật Bảng Đánh giá Rolling Backtest & Độ tin cậy AI
+        renderBacktestPanel(backtestRes);
+    }
+
+    /**
+     * TÍNH TOÁN KIỂM ĐỊNH ROLLING BACKTEST & DẢI CẬN PHƯƠNG SAI MÙA VỤ
+     */
+    function calculateRollingBacktest() {
+        const app = window.THACO_APP;
+        if (!app || !app.calculateReportData) return null;
+
+        const calcedRows = app.calculateReportData();
+        const actualMonths = (app.state && app.state.actualMonths) || [1, 2, 3, 4, 5, 6, 7];
+
+        if (!actualMonths || actualMonths.length < 3) {
+            return null;
+        }
+
+        // Chia tập Train / Test: Dùng các tháng đầu làm Train, 2 tháng thực tế gần nhất làm Test
+        const splitIdx = Math.max(1, actualMonths.length - 2);
+        const trainMonths = actualMonths.slice(0, splitIdx);
+        const testMonths = actualMonths.slice(splitIdx);
+
+        const sum26 = Array(12).fill(0);
+        const sum25 = Array(12).fill(0);
+        const sum24 = Array(12).fill(0);
+
+        calcedRows.forEach(r => {
+            for (let i = 0; i < 12; i++) {
+                sum26[i] += (r.monthly2026 && r.monthly2026[i]) || 0;
+                sum25[i] += (r.monthly2025 && r.monthly2025[i]) || 0;
+                sum24[i] += (r.monthly2024 && r.monthly2024[i]) || 0;
+            }
+        });
+
+        // Tính hệ số run-rate chỉ trên tập huấn luyện (trainMonths)
+        const trainSum26 = trainMonths.reduce((s, m) => s + sum26[m - 1], 0);
+        const trainSum25 = trainMonths.reduce((s, m) => s + sum25[m - 1], 0);
+        const backtestMultiplier = trainSum25 > 0 ? (trainSum26 / trainSum25) : 1.0;
+
+        const backtestDetails = [];
+        let sumApe = 0;
+
+        testMonths.forEach(m => {
+            const actualVal = sum26[m - 1] || 0;
+            const base25 = sum25[m - 1] || 0;
+            const predictedVal = base25 > 0 ? (base25 * backtestMultiplier) : (trainSum26 / trainMonths.length);
+            const errorAbs = Math.abs(actualVal - predictedVal);
+            const ape = actualVal > 0 ? (errorAbs / actualVal * 100) : 0;
+            sumApe += ape;
+
+            let accuracyRating = 'Xuất sắc';
+            let badgeClass = 'bg-emerald-100 text-emerald-800 border-emerald-300';
+            if (ape > 20) {
+                accuracyRating = 'Biến động cao';
+                badgeClass = 'bg-rose-100 text-rose-800 border-rose-300';
+            } else if (ape > 10) {
+                accuracyRating = 'Khá';
+                badgeClass = 'bg-amber-100 text-amber-800 border-amber-300';
+            }
+
+            backtestDetails.push({
+                month: m,
+                monthLabel: `Tháng ${m < 10 ? '0' + m : m}/2026`,
+                actual: actualVal,
+                predicted: predictedVal,
+                errorAbs: errorAbs,
+                ape: ape,
+                rating: accuracyRating,
+                badgeClass: badgeClass
+            });
+        });
+
+        const mape = testMonths.length > 0 ? (sumApe / testMonths.length) : 0;
+        const confidenceScore = Math.max(0, Math.min(100, Math.round(100 - mape)));
+
+        // Tính dải phương sai mùa vụ (bounds) cho các tháng còn lại trong năm
+        const remainingMonths = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].filter(m => !actualMonths.includes(m));
+        const actualSum26 = actualMonths.reduce((s, m) => s + sum26[m - 1], 0);
+        const actualSum25 = actualMonths.reduce((s, m) => s + sum25[m - 1], 0);
+        const fullMultiplier = actualSum25 > 0 ? (actualSum26 / actualSum25) : 1.0;
+
+        const bounds = {};
+        remainingMonths.forEach(m => {
+            const base25 = sum25[m - 1] || 0;
+            const base24 = sum24[m - 1] || 0;
+            const predicted = base25 > 0 ? (base25 * fullMultiplier) : (actualSum26 / actualMonths.length);
+            const histSpread = base24 > 0 ? Math.abs((base25 - base24) / base24) : 0.12;
+            const spread = Math.max(0.06, Math.min(0.20, histSpread * 0.5));
+            bounds[m] = {
+                predicted: predicted,
+                min: Math.max(0, predicted * (1 - spread)),
+                max: predicted * (1 + spread),
+                spreadPct: (spread * 100).toFixed(1)
+            };
+        });
+
+        return {
+            trainPeriod: `T${trainMonths[0]} - T${trainMonths[trainMonths.length - 1]}`,
+            testPeriod: `T${testMonths[0]} - T${testMonths[testMonths.length - 1]}`,
+            backtestMultiplier: backtestMultiplier,
+            fullMultiplier: fullMultiplier,
+            details: backtestDetails,
+            mape: mape,
+            confidenceScore: confidenceScore,
+            bounds: bounds
+        };
+    }
+
+    /**
+     * RENDER GIAO DIỆN BẢNG BACKTEST & KPI ĐỘ TIN CẬY
+     */
+    function renderBacktestPanel(backtestRes) {
+        const elMape = document.getElementById('kpi-backtest-mape');
+        const elTrain = document.getElementById('kpi-backtest-train');
+        const elTest = document.getElementById('kpi-backtest-test');
+        const elBadge = document.getElementById('backtest-confidence-badge');
+        const tbody = document.getElementById('backtest-table-body');
+
+        if (!backtestRes) {
+            if (elBadge) {
+                elBadge.textContent = 'Chưa đủ kỳ dữ liệu (Cần ≥ 3 tháng)';
+                elBadge.className = 'px-2.5 py-1 rounded-full text-xs font-black bg-slate-100 text-slate-700 border border-slate-300';
+            }
+            if (tbody) {
+                tbody.innerHTML = '<tr><td colspan="6" class="p-4 text-center text-slate-400">Cần tối thiểu 3 tháng thực tế để thực hiện Rolling Backtest.</td></tr>';
+            }
+            return;
+        }
+
+        if (elMape) {
+            elMape.textContent = `${backtestRes.mape.toFixed(1)}%`;
+            elMape.className = `text-base font-black font-mono mt-0.5 ${backtestRes.mape <= 10 ? 'text-emerald-700' : (backtestRes.mape <= 20 ? 'text-amber-700' : 'text-rose-700')}`;
+        }
+        if (elTrain) elTrain.textContent = backtestRes.trainPeriod;
+        if (elTest) elTest.textContent = backtestRes.testPeriod;
+
+        if (elBadge) {
+            const conf = backtestRes.confidenceScore;
+            let confLabel = 'Rất cao';
+            let badgeClass = 'bg-emerald-100 text-emerald-800 border-emerald-300';
+            if (conf < 80) {
+                confLabel = 'Khá';
+                badgeClass = 'bg-amber-100 text-amber-800 border-amber-300';
+            }
+            if (conf < 70) {
+                confLabel = 'Cần lưu ý';
+                badgeClass = 'bg-rose-100 text-rose-800 border-rose-300';
+            }
+            elBadge.textContent = `Độ tin cậy: ${conf}% (${confLabel})`;
+            elBadge.className = `px-2.5 py-1 rounded-full text-xs font-black border ${badgeClass}`;
+        }
+
+        if (tbody) {
+            tbody.innerHTML = '';
+            backtestRes.details.forEach(item => {
+                const tr = document.createElement('tr');
+                tr.className = 'hover:bg-slate-50 transition-colors';
+                tr.innerHTML = `
+                    <td class="px-3 py-2 font-bold text-slate-800">${item.monthLabel}</td>
+                    <td class="px-3 py-2 text-right text-[#00529C] font-bold">${Math.round(item.actual).toLocaleString('vi-VN')}</td>
+                    <td class="px-3 py-2 text-right text-indigo-700">${Math.round(item.predicted).toLocaleString('vi-VN')}</td>
+                    <td class="px-3 py-2 text-right text-slate-700">${Math.round(item.errorAbs).toLocaleString('vi-VN')}</td>
+                    <td class="px-3 py-2 text-right font-bold ${item.ape <= 10 ? 'text-emerald-700' : (item.ape <= 20 ? 'text-amber-700' : 'text-rose-700')}">
+                        ${item.ape.toFixed(1)}%
+                    </td>
+                    <td class="px-3 py-2 text-center">
+                        <span class="px-2 py-0.5 rounded text-[10px] font-black border ${item.badgeClass}">
+                            ${item.rating}
+                        </span>
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
     }
 
     /**
@@ -2364,11 +2698,13 @@
         state: dashState,
         getGroupIcon: getGroupIcon,
         exportPNG: exportMainChartPNG,
-        exportExcel: exportDashboardDataExcel
+        exportExcel: exportDashboardDataExcel,
+        openDrillDownModal: openDrillDownModal
     };
 
     window.renderDashboard = renderDashboard;
     window.renderDashboardCharts = renderDashboard;
     window.getGroupIcon = getGroupIcon;
+    window.openDrillDownModal = openDrillDownModal;
 
 })();

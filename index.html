@@ -262,6 +262,15 @@
                     </svg>
                     <span class="whitespace-nowrap">Báo cáo Tổng hợp Chi phí</span>
                 </button>
+                <button id="tab-cbnv-btn" data-tab="cbnv"
+                    class="tab-btn relative z-10 px-3.5 py-1.5 text-xs font-bold text-slate-600 hover:text-[#00529C] transition-colors duration-200 inline-flex flex-row items-center gap-2 whitespace-nowrap shrink-0 rounded-lg">
+                    <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                    </svg>
+                    <span class="whitespace-nowrap">Chi phí / CB-NV</span>
+                    <span class="px-1.5 py-0.2 text-[9px] font-black bg-blue-100 text-blue-800 rounded-full border border-blue-200">Mục 2.5</span>
+                </button>
                 <button id="tab-dashboard-btn" data-tab="dashboard"
                     class="tab-btn relative z-10 px-3.5 py-1.5 text-xs font-bold text-slate-600 hover:text-[#00529C] transition-colors duration-200 inline-flex flex-row items-center gap-2 whitespace-nowrap shrink-0 rounded-lg">
                     <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -308,20 +317,39 @@
             <!-- Toolbar Hiển thị Cột, Bộ Lọc Khoản Mục & Mở rộng/Thu gọn (Canh lề 100% phẳng hàng với Bảng) -->
             <div id="report-view-controls-bar"
                 class="flex flex-wrap items-center justify-between gap-3 mb-3 bg-white p-3 rounded-xl border border-slate-200 text-xs shadow-sm">
-                <!-- Scope of categories: All vs Material items -->
-                <div id="cost-category-filter-group"
-                    class="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200">
-                    <span class="text-[10px] text-slate-600 font-bold uppercase px-1.5">Khoản mục:</span>
-                    <button id="btn-filter-material-all"
-                        class="px-2.5 py-1 text-xs font-bold rounded-lg bg-[#00529C] text-white shadow-sm transition-all">
-                        Tất cả (30)
-                    </button>
-                    <button id="btn-filter-material-only"
-                        class="px-2.5 py-1 text-xs font-medium rounded-lg bg-white text-amber-800 hover:bg-slate-50 border border-slate-200 transition-all flex items-center gap-1.5">
-                        <span>⭐ Chỉ xem Trọng yếu</span>
-                        <span id="material-count-badge"
-                            class="bg-amber-200 text-amber-900 border border-amber-300 px-1.5 py-0.2 rounded-full text-[10px] font-extrabold">10</span>
-                    </button>
+                <div class="flex items-center gap-2 flex-wrap">
+                    <!-- Chuyển đổi Dạng xem: Chi tiết 12 Tháng vs So sánh Cùng kỳ YoY 3 Năm -->
+                    <div id="report-view-mode-group"
+                        class="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200">
+                        <span class="text-[10px] text-slate-600 font-bold uppercase px-1.5">Dạng xem:</span>
+                        <button id="btn-view-mode-monthly"
+                            class="px-2.5 py-1 text-xs font-bold rounded-lg bg-[#00529C] text-white shadow-sm transition-all flex items-center gap-1">
+                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+                            <span>12 Tháng</span>
+                        </button>
+                        <button id="btn-view-mode-yoy"
+                            class="px-2.5 py-1 text-xs font-medium rounded-lg bg-white text-slate-700 hover:bg-slate-50 border border-slate-200 transition-all flex items-center gap-1">
+                            <svg class="w-3.5 h-3.5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+                            <span>YoY 3 Năm</span>
+                            <span class="px-1.5 py-0.2 text-[9px] font-black bg-indigo-100 text-indigo-800 rounded-full border border-indigo-200">2024-2026</span>
+                        </button>
+                    </div>
+
+                    <!-- Scope of categories: All vs Material items -->
+                    <div id="cost-category-filter-group"
+                        class="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200">
+                        <span class="text-[10px] text-slate-600 font-bold uppercase px-1.5">Khoản mục:</span>
+                        <button id="btn-filter-material-all"
+                            class="px-2.5 py-1 text-xs font-bold rounded-lg bg-[#00529C] text-white shadow-sm transition-all">
+                            Tất cả (30)
+                        </button>
+                        <button id="btn-filter-material-only"
+                            class="px-2.5 py-1 text-xs font-medium rounded-lg bg-white text-amber-800 hover:bg-slate-50 border border-slate-200 transition-all flex items-center gap-1.5">
+                            <span>⭐ Trọng yếu</span>
+                            <span id="material-count-badge"
+                                class="bg-amber-200 text-amber-900 border border-amber-300 px-1.5 py-0.2 rounded-full text-[10px] font-extrabold">10</span>
+                        </button>
+                    </div>
                 </div>
 
                 <!-- View Controls -->
@@ -464,6 +492,17 @@
                     </div>
 
                     <span class="text-slate-300">|</span>
+                    <!-- Ngưỡng cảnh báo biến động bất thường YoY (Mục 2.3 - Mặc định ±20%) -->
+                    <div id="yoy-threshold-wrapper" class="flex items-center gap-1.5 bg-amber-50/80 px-2 py-1 rounded-lg border border-amber-200" title="Cảnh báo biến động YoY: Các khoản mục tăng/giảm vượt ngưỡng này sẽ được đánh dấu cảnh báo">
+                        <span class="text-[10px] font-bold text-amber-900 uppercase">⚡ Cảnh báo YoY:</span>
+                        <span class="text-xs font-bold text-amber-900">±</span>
+                        <input type="number" id="input-yoy-threshold" value="20" min="1" max="100" step="5"
+                            class="w-12 px-1 py-0.5 text-xs font-black text-center text-amber-950 bg-white border border-amber-300 rounded focus:ring-1 focus:ring-amber-500 focus:outline-none"
+                            title="Ngưỡng cảnh báo biến động cùng kỳ YoY (%)">
+                        <span class="text-xs font-bold text-amber-900">%</span>
+                    </div>
+
+                    <span class="text-slate-300">|</span>
                     <button id="btn-expand-all"
                         class="px-2.5 py-1 rounded-lg bg-blue-50 text-[#00529C] hover:bg-blue-100 text-[11px] border border-blue-200 font-bold transition-all">
                         + Mở rộng tất cả
@@ -542,7 +581,165 @@
             </div>
         </div>
 
-        <!-- Tab 2: Visual Chart Dashboard Section (Được quản lý và kết xuất độc lập bởi dashboard.js) -->
+        <!-- Tab 2: Chi phí / CB-NV Section (Mục 2.5 - Vị trí độc lập thứ 2 sau Báo cáo) -->
+        <div id="cbnv-section" class="hidden flex-1 flex flex-col min-h-0 bg-slate-50 border border-slate-200 rounded-xl p-4 overflow-auto shadow-lg space-y-4">
+            <!-- Top Controls Bar -->
+            <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-wrap items-center justify-between gap-3">
+                <div>
+                    <div class="flex items-center gap-2">
+                        <span class="p-2 rounded-lg bg-blue-100 text-[#00529C]">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"/></svg>
+                        </span>
+                        <div>
+                            <h2 class="text-base font-bold text-slate-900 flex items-center gap-2">
+                                Phân tích Định mức Chi phí Hành chính / Cán bộ - Nhân viên (CB-NV)
+                                <span class="text-xs bg-blue-100 text-[#00529C] px-2 py-0.5 rounded border border-blue-200 font-bold">Mục 2.5</span>
+                            </h2>
+                            <p class="text-xs text-slate-500">
+                                Đo lường định mức chi phí hành chính bình quân trên mỗi nhân sự (Theo Nhân sự Thực tế & Định biên ngân sách).
+                            </p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Right Action Buttons & Quick Toggle Switch -->
+                <div class="flex items-center gap-2 flex-wrap">
+                    <!-- Quick Toggle Indicator Mode (Thực tế vs Định biên vs Song song) -->
+                    <div class="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200 text-xs">
+                        <span class="text-[10px] uppercase font-bold text-slate-500 px-1.5">Chỉ số:</span>
+                        <button id="btn-cbnv-mode-thucte" class="px-2.5 py-1 font-bold rounded-lg transition-all text-slate-700 hover:bg-slate-200">
+                            Thực tế
+                        </button>
+                        <button id="btn-cbnv-mode-dinhbien" class="px-2.5 py-1 font-bold rounded-lg transition-all text-slate-700 hover:bg-slate-200">
+                            Định biên
+                        </button>
+                        <button id="btn-cbnv-mode-both" class="px-2.5 py-1 font-bold rounded-lg transition-all bg-[#00529C] text-white shadow-sm">
+                            ⚡ Song song cả 2
+                        </button>
+                    </div>
+
+                    <button id="btn-open-cbnv-upload-modal" class="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-sm flex items-center gap-1.5 transition-all">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
+                        <span>📥 Nạp Excel Nhân sự</span>
+                    </button>
+
+                    <button id="btn-sync-cbnv-gsheet" class="px-3 py-1.5 rounded-lg bg-blue-50 text-[#00529C] hover:bg-blue-100 border border-blue-200 font-bold text-xs shadow-sm flex items-center gap-1.5 transition-all">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+                        <span>🔄 Đồng bộ DM_CBNV</span>
+                    </button>
+
+                    <button id="btn-export-cbnv-excel" class="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 font-bold text-xs shadow-sm flex items-center gap-1.5 transition-all">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                        <span>Xuất Excel</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Audit Reconciliation Box (0-person audit warning) -->
+            <div id="cbnv-audit-box" class="p-3 rounded-xl border text-xs flex flex-wrap items-center justify-between gap-2 bg-emerald-50 border-emerald-200 text-emerald-900">
+                <!-- Populated dynamically via app.js -->
+            </div>
+
+            <!-- Executive KPI Cards Strip -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                    <div class="text-[11px] font-bold text-slate-500 uppercase">Tổng Nhân sự Hệ thống</div>
+                    <div class="flex items-baseline gap-2 mt-1">
+                        <div id="kpi-cbnv-thucte-total" class="text-2xl font-black text-[#00529C] font-mono">0</div>
+                        <span class="text-xs text-slate-500 font-medium">người thực tế</span>
+                    </div>
+                    <div class="text-xs text-slate-500 mt-1 flex items-center justify-between">
+                        <span>Định biên: <strong id="kpi-cbnv-dinhbien-total" class="font-mono text-slate-700">0</strong></span>
+                        <span id="kpi-cbnv-fill-rate" class="px-1.5 py-0.2 rounded bg-blue-50 text-blue-800 font-bold">0% lấp đầy</span>
+                    </div>
+                </div>
+
+                <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                    <div class="text-[11px] font-bold text-slate-500 uppercase">CPHC / CB-NV Thực tế (2026)</div>
+                    <div class="flex items-baseline gap-1 mt-1">
+                        <div id="kpi-cphc-per-thucte-year" class="text-2xl font-black text-emerald-700 font-mono">0.0</div>
+                        <span class="text-xs text-slate-500 font-medium">Tr.đ / người / năm</span>
+                    </div>
+                    <div class="text-xs text-slate-500 mt-1">
+                        Tương đương: <strong id="kpi-cphc-per-thucte-month" class="text-emerald-800 font-mono">0.0</strong> Tr.đ / người / tháng
+                    </div>
+                </div>
+
+                <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                    <div class="text-[11px] font-bold text-slate-500 uppercase">CPHC / Định biên (2026)</div>
+                    <div class="flex items-baseline gap-1 mt-1">
+                        <div id="kpi-cphc-per-dinhbien-year" class="text-2xl font-black text-indigo-700 font-mono">0.0</div>
+                        <span class="text-xs text-slate-500 font-medium">Tr.đ / người / năm</span>
+                    </div>
+                    <div class="text-xs text-slate-500 mt-1">
+                        Tương đương: <strong id="kpi-cphc-per-dinhbien-month" class="text-indigo-800 font-mono">0.0</strong> Tr.đ / người / tháng
+                    </div>
+                </div>
+
+                <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                    <div class="text-[11px] font-bold text-slate-500 uppercase">Biến động Định mức (YoY 2026 vs 2025)</div>
+                    <div class="flex items-baseline gap-1 mt-1">
+                        <div id="kpi-cbnv-yoy-diff" class="text-2xl font-black text-slate-800 font-mono">+0.0%</div>
+                    </div>
+                    <div class="text-xs text-slate-500 mt-1 flex items-center justify-between">
+                        <span>Chênh lệch: <strong id="kpi-cbnv-yoy-amt" class="font-mono text-slate-700">0.0</strong> Tr.đ/người</span>
+                        <span id="kpi-cbnv-yoy-badge" class="px-1.5 py-0.2 rounded text-[10px] font-bold bg-slate-100 text-slate-700">Ổn định</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Charts Section: Benchmark & Correlation -->
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                    <div class="flex items-center justify-between pb-2 border-b border-slate-100 mb-3">
+                        <h3 class="text-xs font-bold text-[#00529C] uppercase tracking-wider">
+                            📊 So sánh Định mức Chi phí/Người giữa các Đơn vị vs Benchmark Toàn Hệ Thống
+                        </h3>
+                        <span class="text-[10px] text-slate-500 font-bold">ĐVT: Tr.đ / người / năm</span>
+                    </div>
+                    <div class="relative h-72 w-full">
+                        <canvas id="chart-cbnv-benchmark"></canvas>
+                    </div>
+                </div>
+
+                <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                    <div class="flex items-center justify-between pb-2 border-b border-slate-100 mb-3">
+                        <h3 class="text-xs font-bold text-[#00529C] uppercase tracking-wider">
+                            🎯 Tương quan Chi phí Hành chính (Tr.đ) vs Quy mô Nhân sự (Người)
+                        </h3>
+                        <span class="text-[10px] text-slate-500 font-bold">Tương quan tuyến tính</span>
+                    </div>
+                    <div class="relative h-72 w-full">
+                        <canvas id="chart-cbnv-scatter"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Main Data Table: Chi phí / CB-NV theo từng Pháp nhân -->
+            <div class="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden flex flex-col">
+                <div class="p-3 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2 bg-slate-50 text-xs">
+                    <div class="flex items-center gap-2">
+                        <span class="font-bold text-slate-700 uppercase text-[11px]">Bảng Chi tiết Định mức Chi phí / Nhân sự theo Pháp nhân</span>
+                        <span id="cbnv-table-count" class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-[#00529C]">0 đơn vị</span>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <input type="text" id="input-cbnv-search" placeholder="🔍 Tìm kiếm đơn vị / pháp nhân..." class="px-2.5 py-1 text-xs border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-[#00529C] w-64 bg-white">
+                    </div>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-xs text-left text-slate-700 whitespace-nowrap">
+                        <thead id="cbnv-table-head" class="bg-[#00529C] text-white text-[11px] uppercase border-b border-blue-900 select-none">
+                            <!-- Populated dynamically -->
+                        </thead>
+                        <tbody id="cbnv-table-body" class="divide-y divide-slate-100 font-mono text-xs">
+                            <!-- Populated dynamically -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tab 3: Visual Chart Dashboard Section (Được quản lý và kết xuất độc lập bởi dashboard.js) -->
         <div id="dashboard-section"
             class="hidden flex-1 flex flex-col min-h-0 bg-slate-50 border border-slate-200 rounded-xl p-4 overflow-auto shadow-lg space-y-4">
             <!-- Nội dung Slicers, KPIs, Biểu đồ Full-width và Lưới biểu đồ do dashboard.js kết xuất -->
@@ -872,19 +1069,25 @@
                     </div>
                 </div>
 
-                <!-- Web App URL Input Box (~40%) -->
+                <!-- Web App URL & API Key Input Box (~40%) -->
                 <div
-                    class="md:col-span-4 bg-slate-50 border border-slate-200 rounded-xl p-4 shadow-sm flex items-center justify-between gap-3">
-                    <span class="text-[11px] font-bold uppercase text-slate-700 tracking-wider whitespace-nowrap">Web
-                        App URL:</span>
-                    <div class="flex items-center gap-1.5 flex-1">
-                        <input type="url" id="tab-input-gsheet-url"
-                            placeholder="https://script.google.com/macros/s/.../exec"
-                            class="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-mono text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500">
+                    class="md:col-span-4 bg-slate-50 border border-slate-200 rounded-xl p-3.5 shadow-sm flex flex-col justify-between gap-2">
+                    <div class="flex items-center justify-between gap-2">
+                        <span class="text-[11px] font-bold uppercase text-slate-700 tracking-wider whitespace-nowrap">Cấu hình kết nối & Khóa API:</span>
                         <button id="btn-tab-save-url"
-                            class="px-3 py-1.5 bg-[#00529C] hover:bg-blue-700 text-white font-bold text-xs rounded-lg shadow-sm transition-all whitespace-nowrap">
-                            Lưu
+                            class="px-3 py-1 bg-[#00529C] hover:bg-blue-700 text-white font-bold text-xs rounded-lg shadow-sm transition-all whitespace-nowrap">
+                            Lưu cấu hình
                         </button>
+                    </div>
+                    <div class="space-y-1.5">
+                        <input type="url" id="tab-input-gsheet-url"
+                            placeholder="Web App URL: https://script.google.com/macros/s/.../exec"
+                            class="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1 text-[11px] font-mono text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                            title="Đường dẫn Web App Apps Script">
+                        <input type="password" id="tab-input-gsheet-key"
+                            placeholder="Khóa API_KEY (mặc định: THACO_CPHC_2026_SECURE_TOKEN)"
+                            class="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1 text-[11px] font-mono text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                            title="Khóa API_KEY bảo mật">
                     </div>
                 </div>
             </div>
@@ -1206,6 +1409,79 @@ function doPost(e) {
         </div>
     </div>
 
+    <!-- Modal Nạp File Excel Nhân Sự CB-NV (Mục 2.5) -->
+    <div id="cbnv-upload-modal" class="hidden fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+        <div class="bg-white border border-slate-200 rounded-2xl max-w-2xl w-full p-6 shadow-2xl max-h-[90vh] overflow-y-auto space-y-4">
+            <div class="flex items-center justify-between pb-3 border-b border-slate-200">
+                <div class="flex items-center gap-2">
+                    <span class="p-2 rounded-lg bg-emerald-100 text-emerald-800">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
+                    </span>
+                    <div>
+                        <h3 class="text-base font-bold text-slate-900">Nạp File Excel Nhân Sự CB-NV (Định biên & Thực tế)</h3>
+                        <p class="text-xs text-slate-500">Cập nhật số lượng nhân sự các Pháp nhân / Đơn vị phục vụ tính định mức chi phí</p>
+                    </div>
+                </div>
+                <button id="btn-close-cbnv-modal" class="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                </button>
+            </div>
+
+            <!-- Drag & Drop Zone -->
+            <div id="cbnv-dropzone" class="border-2 border-dashed border-slate-300 hover:border-emerald-500 rounded-xl p-6 text-center cursor-pointer transition-all bg-slate-50/50 hover:bg-emerald-50/20 flex flex-col items-center justify-center gap-2">
+                <svg class="w-10 h-10 text-emerald-600 animate-bounce" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+                </svg>
+                <div class="text-sm font-bold text-slate-700">Kéo thả file Excel Nhân sự vào đây, hoặc click để chọn file</div>
+                <div class="text-xs text-slate-400">Hỗ trợ định dạng .xlsx, .xls (Cột chuẩn: Mã ĐV, Tên Đơn vị, Định biên, Thực tế)</div>
+                <input type="file" id="input-cbnv-file" accept=".xlsx, .xls" class="hidden">
+            </div>
+
+            <!-- Preview Container -->
+            <div id="cbnv-preview-container" class="hidden space-y-3">
+                <div class="flex items-center justify-between text-xs bg-slate-50 border border-slate-200 p-2.5 rounded-lg text-slate-800">
+                    <div>File đã đọc: <strong id="cbnv-preview-filename" class="font-mono">--</strong></div>
+                    <div id="cbnv-preview-counts" class="font-bold">0 dòng dữ liệu</div>
+                </div>
+
+                <!-- Audit Reconciliation Box (Kiểm toán Nhân sự: Khớp 0 người / Cảnh báo vàng không có dòng CỘNG) -->
+                <div id="cbnv-preview-audit-box" class="p-3 rounded-xl border text-xs flex flex-wrap items-center justify-between gap-2">
+                    <!-- Populated dynamically via handleCbnvFileSelected -->
+                </div>
+
+                <div class="max-h-60 overflow-y-auto border border-slate-200 rounded-lg">
+                    <table class="w-full text-xs text-left text-slate-700">
+                        <thead class="bg-slate-100 text-slate-700 sticky top-0 font-bold border-b border-slate-200">
+                            <tr>
+                                <th class="px-2.5 py-1.5">Mã ĐV</th>
+                                <th class="px-2.5 py-1.5">Tên Đơn Vị</th>
+                                <th class="px-2.5 py-1.5 text-right">Định biên</th>
+                                <th class="px-2.5 py-1.5 text-right">Thực tế</th>
+                                <th class="px-2.5 py-1.5 text-center">Trạng thái</th>
+                            </tr>
+                        </thead>
+                        <tbody id="cbnv-preview-tbody" class="divide-y divide-slate-100 font-mono">
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="flex items-center justify-between pt-3 border-t border-slate-200 text-xs">
+                <button id="btn-download-cbnv-template" class="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold flex items-center gap-1.5">
+                    <span>📑 Tải file Excel mẫu</span>
+                </button>
+                <div class="flex items-center gap-2">
+                    <button id="btn-cancel-cbnv-modal" class="px-4 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold">
+                        Hủy bỏ
+                    </button>
+                    <button id="btn-confirm-cbnv-upload" disabled class="px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold shadow-sm transition-all flex items-center gap-1.5">
+                        <span>💾 Cập nhật Dữ liệu Nhân sự</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Modal Cấu hình Kết nối Google Sheet -->
     <div id="gsheet-config-modal"
         class="hidden fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
@@ -1254,6 +1530,20 @@ function doPost(e) {
                         class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-xs font-mono text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500">
                     <p class="text-[11px] text-slate-500 mt-1">
                         Dán đường link Web App sinh ra sau khi triển khai Apps Script trong file Google Sheet.
+                    </p>
+                </div>
+
+                <!-- API Key Input -->
+                <div>
+                    <label class="block font-bold text-slate-900 mb-1 flex items-center justify-between">
+                        <span>Khóa Bảo Mật API_KEY:</span>
+                        <span class="text-[10px] px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 font-bold border border-emerald-300">Bảo mật bắt buộc</span>
+                    </label>
+                    <input type="password" id="input-gsheet-api-key"
+                        placeholder="Nhập khóa API_KEY (Mặc định: THACO_CPHC_2026_SECURE_TOKEN)"
+                        class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-xs font-mono text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500">
+                    <p class="text-[11px] text-slate-500 mt-1">
+                        Khóa bảo mật quản lý trên Google Sheet &gt; Menu "🚗 THACO AUTO" &gt; "🔐 Kiểm tra / Đổi khóa bảo mật API_KEY".
                     </p>
                 </div>
 
@@ -1396,6 +1686,139 @@ function doPost(e) {
             </form>
         </div>
     </div>
+
+    <!-- Modal Thư viện Icon Mini (Icon Library & Picker) -->
+    <div id="group-icon-picker-modal"
+        class="hidden fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+        <div class="bg-white border border-slate-200 rounded-2xl max-w-xl w-full p-6 shadow-2xl flex flex-col max-h-[90vh]">
+            <!-- Header -->
+            <div class="flex items-start justify-between pb-3 border-b border-slate-200">
+                <div>
+                    <h3 class="text-base font-bold text-slate-900 flex items-center gap-2">
+                        <span>🎨</span> Thư Viện Icon Nhóm Chi Phí
+                    </h3>
+                    <p class="text-xs text-slate-500 mt-0.5">
+                        Đang chọn icon cho: <span id="icon-picker-group-name" class="font-bold text-[#00529C]">Nhóm chi phí</span>
+                    </p>
+                </div>
+                <button id="btn-close-icon-picker" type="button"
+                    class="text-slate-400 hover:text-slate-700 hover:bg-slate-100 p-1.5 rounded-lg text-base font-bold transition-colors">✕</button>
+            </div>
+
+            <!-- Search & Filter Controls -->
+            <div class="py-3 space-y-2 border-b border-slate-100">
+                <!-- Search Box -->
+                <div class="relative">
+                    <span class="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400 pointer-events-none text-xs">🔍</span>
+                    <input type="text" id="icon-picker-search"
+                        placeholder="Tìm icon (vd: văn phòng, xe, tiếp khách, cơm, kinh doanh, nhân viên...)"
+                        class="w-full pl-8 pr-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-xs font-semibold text-slate-800 placeholder:text-slate-400 focus:bg-white focus:border-[#00529C] focus:outline-none transition-all">
+                </div>
+
+                <!-- Category Tabs (Pills) -->
+                <div class="flex flex-wrap items-center gap-1.5 text-[11px]" id="icon-picker-tabs">
+                    <button type="button" data-cat="all"
+                        class="icon-tab-btn px-2.5 py-1 rounded-full font-bold bg-[#00529C] text-white shadow-2xs transition-all">Tất cả</button>
+                    <button type="button" data-cat="suggested"
+                        class="icon-tab-btn px-2.5 py-1 rounded-full font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 transition-all">🌟 Gợi ý 3 nhóm</button>
+                    <button type="button" data-cat="operation"
+                        class="icon-tab-btn px-2.5 py-1 rounded-full font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 transition-all">🏢 Vận hành & Quản trị</button>
+                    <button type="button" data-cat="business"
+                        class="icon-tab-btn px-2.5 py-1 rounded-full font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 transition-all">💼 Kinh doanh</button>
+                    <button type="button" data-cat="hr"
+                        class="icon-tab-btn px-2.5 py-1 rounded-full font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 transition-all">👥 CB-NV</button>
+                    <button type="button" data-cat="technical"
+                        class="icon-tab-btn px-2.5 py-1 rounded-full font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 transition-all">🛠️ Mua sắm & Kỹ thuật</button>
+                </div>
+            </div>
+
+            <!-- Icon Grid (Scrollable) -->
+            <div class="py-3 flex-1 overflow-y-auto max-h-[300px] pr-1">
+                <div id="icon-picker-grid" class="grid grid-cols-6 sm:grid-cols-8 gap-2">
+                    <!-- Populated dynamically via app.js -->
+                </div>
+                <div id="icon-picker-empty" class="hidden text-center py-8 text-xs text-slate-400 italic">
+                    Không tìm thấy icon nào phù hợp với từ khóa này.
+                </div>
+            </div>
+
+            <!-- Custom Emoji & Footer Actions -->
+            <div class="pt-3 border-t border-slate-200 flex flex-wrap items-center justify-between gap-3 text-xs">
+                <!-- Custom Emoji input -->
+                <div class="flex items-center gap-2">
+                    <span class="text-slate-500 font-medium">Tự nhập:</span>
+                    <input type="text" id="icon-picker-custom-input" maxlength="4" placeholder="VD: 🚗"
+                        class="w-14 text-center py-1 bg-slate-50 border border-slate-300 rounded text-base font-bold focus:border-[#00529C] focus:outline-none">
+                    <button type="button" id="btn-apply-custom-icon"
+                        class="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded font-bold transition-colors">Dùng</button>
+                </div>
+
+                <!-- Action buttons -->
+                <div class="flex items-center gap-2">
+                    <button type="button" id="btn-reset-group-icon"
+                        class="text-slate-500 hover:text-rose-600 font-medium underline text-[11px] mr-1"
+                        title="Khôi phục về icon mặc định của hệ thống">Mặc định</button>
+                    <button type="button" id="btn-cancel-icon-picker"
+                        class="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 font-bold text-slate-700">Đóng</button>
+                    <button type="button" id="btn-confirm-icon-picker"
+                        class="px-4 py-1.5 rounded-lg bg-[#00529C] hover:bg-blue-700 text-white font-bold shadow-md flex items-center gap-1.5">
+                        <span>Lưu Icon</span>
+                        <span id="icon-picker-confirm-preview" class="text-sm font-normal">🏢</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Thêm / Sửa Nhóm Chi Phí -->
+    <div id="group-edit-modal"
+        class="hidden fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+        <div class="bg-white border border-slate-200 rounded-2xl max-w-md w-full p-6 shadow-2xl">
+            <div class="flex items-center justify-between pb-3 border-b border-slate-200">
+                <h3 class="text-base font-bold text-slate-900 flex items-center gap-2" id="group-edit-modal-title">
+                    ➕ Thêm Nhóm Chi Phí Mới
+                </h3>
+                <button id="btn-close-group-edit-modal" type="button"
+                    class="text-slate-400 hover:text-slate-700 text-lg font-bold">✕</button>
+            </div>
+
+            <form id="form-group-edit-modal" class="my-4 space-y-3.5 text-xs">
+                <input type="hidden" id="group-edit-old-name" value="">
+                
+                <div>
+                    <label class="block font-bold text-slate-800 mb-1" for="group-edit-name-input">
+                        Tên Nhóm Chi Phí (<span class="text-rose-600">*</span>):
+                    </label>
+                    <input type="text" id="group-edit-name-input" required
+                        placeholder="Ví dụ: Phục vụ hoạt động chung, Phục vụ kinh doanh..."
+                        class="w-full bg-slate-50 border border-slate-300 rounded-lg p-2.5 font-bold text-[#00529C] focus:bg-white focus:ring-2 focus:ring-[#00529C] focus:outline-none">
+                </div>
+
+                <div>
+                    <label class="block font-bold text-slate-800 mb-1">
+                        Icon đại diện nhóm:
+                    </label>
+                    <div class="flex items-center gap-3 p-2 bg-slate-50 border border-slate-200 rounded-lg">
+                        <span id="group-edit-current-icon" class="text-2xl w-10 h-10 rounded-lg bg-white border border-slate-300 flex items-center justify-center shadow-xs">🏢</span>
+                        <div class="flex-1">
+                            <button type="button" id="btn-open-picker-from-group-modal"
+                                class="px-3 py-1.5 bg-white hover:bg-blue-50 text-[#00529C] border border-blue-300 rounded-md font-bold shadow-2xs transition-colors flex items-center gap-1.5">
+                                <span>🎨 Chọn từ Thư viện Icon...</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="flex justify-end gap-2 pt-3 border-t border-slate-200">
+                    <button type="button" id="btn-cancel-group-edit-modal"
+                        class="px-4 py-2 rounded-lg bg-slate-100 hover:bg-slate-200 font-bold text-slate-700">Hủy</button>
+                    <button type="submit"
+                        class="px-5 py-2 rounded-lg bg-[#00529C] hover:bg-[#003870] text-white font-bold shadow-md">Lưu Nhóm</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
 
     <!-- Scripts -->
     <script src="app_data.js?v=20260908_v21"></script>
