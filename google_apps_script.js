@@ -38,6 +38,7 @@ var CBNV_COLUMNS = [
   'Mã ĐVCS',
   'Tên Pháp Nhân / Showroom',
   'Năm',
+  'Tháng',
   'Định Biên (Người)',
   'Thực Tế (Người)',
   'Ghi Chú'
@@ -625,7 +626,7 @@ function readDmCbnv(ss) {
   if (data.length <= 1) return [];
 
   var headers = data[0].map(function(h) { return String(h || '').trim().toLowerCase(); });
-  var colMap = { stt: 0, khoi: -1, maQt: -1, tenQt: -1, maPn: -1, tenPn: -1, nam: -1, dinhBien: -1, thucTe: -1, ghiChu: -1 };
+  var colMap = { stt: 0, khoi: -1, maQt: -1, tenQt: -1, maPn: -1, tenPn: -1, nam: -1, thang: -1, dinhBien: -1, thucTe: -1, ghiChu: -1 };
 
   for (var c = 0; c < headers.length; c++) {
     var h = headers[c];
@@ -634,10 +635,16 @@ function readDmCbnv(ss) {
     else if (h.indexOf('tên quản trị') !== -1 || h.indexOf('ten qt') !== -1) colMap.tenQt = c;
     else if (h.indexOf('mã đvcs') !== -1 || h.indexOf('mã pn') !== -1 || h.indexOf('mã pháp nhân') !== -1) colMap.maPn = c;
     else if (h.indexOf('tên pháp nhân') !== -1 || h.indexOf('tên showroom') !== -1 || h.indexOf('tên đvcs') !== -1 || h.indexOf('tên pn') !== -1) colMap.tenPn = c;
-    else if (h.indexOf('năm') !== -1 || h.indexOf('nam') !== -1) colMap.nam = c;
+    else if (h.indexOf('năm') !== -1 || h.indexOf('nam') !== -1 || h.indexOf('year') !== -1) colMap.nam = c;
+    else if (h.indexOf('tháng') !== -1 || h.indexOf('thang') !== -1 || h.indexOf('kỳ') !== -1 || h.indexOf('ky') !== -1 || h.indexOf('month') !== -1) colMap.thang = c;
     else if (h.indexOf('định biên') !== -1 || h.indexOf('dinh bien') !== -1) colMap.dinhBien = c;
     else if (h.indexOf('thực tế') !== -1 || h.indexOf('thuc te') !== -1) colMap.thucTe = c;
     else if (h.indexOf('ghi chú') !== -1 || h.indexOf('ghi chu') !== -1) colMap.ghiChu = c;
+  }
+
+  // Fallback định vị cột Tháng nếu sheet có 11 cột mà tên tiêu đề không khớp chính xác
+  if (colMap.thang === -1 && headers.length >= 11) {
+    colMap.thang = 7; // Cột H (index 7)
   }
 
   var list = [];
@@ -649,6 +656,9 @@ function readDmCbnv(ss) {
     var tenPn = colMap.tenPn !== -1 ? String(row[colMap.tenPn] || '').trim() : '';
     if (!maPn && !tenPn) continue;
 
+    var rawThang = colMap.thang !== -1 ? row[colMap.thang] : '';
+    var thangVal = parseInt(String(rawThang).replace(/[^0-9]/g, ''), 10) || 1;
+
     list.push({
       stt: parseInt(row[colMap.stt], 10) || (list.length + 1),
       khoi: colMap.khoi !== -1 ? String(row[colMap.khoi] || '').trim() : 'VPĐH',
@@ -657,6 +667,7 @@ function readDmCbnv(ss) {
       maPn: maPn,
       tenPn: tenPn,
       nam: colMap.nam !== -1 ? (parseInt(row[colMap.nam], 10) || 2026) : 2026,
+      thang: thangVal,
       dinhBien: colMap.dinhBien !== -1 ? (Number(row[colMap.dinhBien]) || 0) : 0,
       thucTe: colMap.thucTe !== -1 ? (Number(row[colMap.thucTe]) || 0) : 0,
       ghiChu: colMap.ghiChu !== -1 ? String(row[colMap.ghiChu] || '').trim() : ''
@@ -683,13 +694,12 @@ function handleSaveDmCbnv(payload) {
     return jsonResponse({ status: 'error', message: 'Mảng cbnvData không đúng định dạng.' });
   }
 
+  var mode = payload.mode || 'upsert'; // 'upsert' (mặc định) | 'overwrite'
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName(SHEET_DM_CBNV);
   if (!sheet) {
     sheet = ss.insertSheet(SHEET_DM_CBNV);
   }
-
-  sheet.clear();
 
   var headerRow = [
     'STT',
@@ -699,30 +709,72 @@ function handleSaveDmCbnv(payload) {
     'Mã ĐVCS',
     'Tên Pháp Nhân / Showroom',
     'Năm',
+    'Tháng',
     'Định Biên (Người)',
     'Thực Tế (Người)',
     'Ghi Chú'
   ];
 
+  var existingRows = [];
+  if (sheet.getLastRow() > 1 && mode !== 'overwrite') {
+    existingRows = readDmCbnv(ss);
+  }
+
+  var finalRecords = [];
+  if (mode === 'overwrite' || existingRows.length === 0) {
+    finalRecords = list.slice();
+  } else {
+    // Mode upsert: Map theo Khóa duy nhất (Mã ĐVCS + Năm + Tháng)
+    var recordMap = {};
+    existingRows.forEach(function(rec) {
+      var key = (String(rec.maPn || rec.code || '').trim() + '_' + (rec.nam || 2026) + '_' + (rec.thang || 1)).toUpperCase();
+      recordMap[key] = rec;
+    });
+
+    list.forEach(function(item) {
+      var key = (String(item.maPn || item.code || '').trim() + '_' + (item.nam || item.year || 2026) + '_' + (item.thang || item.month || 1)).toUpperCase();
+      recordMap[key] = item; // Ghi đè hoặc thêm mới
+    });
+
+    finalRecords = Object.keys(recordMap).map(function(k) { return recordMap[k]; });
+  }
+
+  // Sắp xếp dữ liệu: Theo Năm tăng dần -> Tháng tăng dần -> Mã ĐVCS
+  finalRecords.sort(function(a, b) {
+    var ya = parseInt(a.nam || a.year || 2026, 10);
+    var yb = parseInt(b.nam || b.year || 2026, 10);
+    if (ya !== yb) return ya - yb;
+
+    var ma = parseInt(a.thang || a.month || 1, 10);
+    var mb = parseInt(b.thang || b.month || 1, 10);
+    if (ma !== mb) return ma - mb;
+
+    var ca = String(a.maPn || a.code || '');
+    var cb = String(b.maPn || b.code || '');
+    return ca.localeCompare(cb);
+  });
+
   var rows = [headerRow];
-  list.forEach(function(item, idx) {
+  finalRecords.forEach(function(item, idx) {
     rows.push([
-      item.stt || (idx + 1),
+      idx + 1,
       item.khoi || 'VPĐH',
       item.maQt || '',
       item.tenQt || '',
       item.maPn || item.code || '',
       item.tenPn || item.name || '',
       item.nam || item.year || 2026,
+      item.thang || item.month || 1,
       Number(item.dinhBien) || 0,
       Number(item.thucTe) || 0,
       item.ghiChu || ''
     ]);
   });
 
-  sheet.getRange(1, 1, rows.length, 10).setValues(rows);
+  sheet.clear();
+  sheet.getRange(1, 1, rows.length, 11).setValues(rows);
 
-  var headerRange = sheet.getRange(1, 1, 1, 10);
+  var headerRange = sheet.getRange(1, 1, 1, 11);
   headerRange.setBackground('#00529C')
              .setFontColor('#FFFFFF')
              .setFontWeight('bold')
@@ -731,21 +783,21 @@ function handleSaveDmCbnv(payload) {
   sheet.setRowHeight(1, 35);
 
   if (rows.length > 1) {
-    sheet.getRange(2, 1, rows.length - 1, 1).setHorizontalAlignment('center');
-    sheet.getRange(2, 2, rows.length - 1, 1).setHorizontalAlignment('center');
-    sheet.getRange(2, 3, rows.length - 1, 1).setHorizontalAlignment('center');
-    sheet.getRange(2, 5, rows.length - 1, 1).setHorizontalAlignment('center');
-    sheet.getRange(2, 7, rows.length - 1, 1).setHorizontalAlignment('center');
-    sheet.getRange(2, 8, rows.length - 1, 2).setNumberFormat('#,##0').setHorizontalAlignment('right');
+    sheet.getRange(2, 1, rows.length - 1, 1).setHorizontalAlignment('center'); // STT
+    sheet.getRange(2, 2, rows.length - 1, 1).setHorizontalAlignment('center'); // Khối
+    sheet.getRange(2, 3, rows.length - 1, 1).setHorizontalAlignment('center'); // Mã QT
+    sheet.getRange(2, 5, rows.length - 1, 1).setHorizontalAlignment('center'); // Mã ĐVCS
+    sheet.getRange(2, 7, rows.length - 1, 2).setHorizontalAlignment('center'); // Năm, Tháng
+    sheet.getRange(2, 9, rows.length - 1, 2).setNumberFormat('#,##0').setHorizontalAlignment('right'); // Định Biên, Thực Tế
   }
 
   sheet.setFrozenRows(1);
-  sheet.autoResizeColumns(1, 10);
+  sheet.autoResizeColumns(1, 11);
 
   return jsonResponse({
     status: 'success',
-    message: 'Đã đồng bộ thành công ' + list.length + ' dòng nhân sự lên Google Sheet DM_CBNV!',
-    count: list.length,
+    message: 'Đã đồng bộ thành công ' + finalRecords.length + ' dòng nhân sự (theo Tháng) lên Google Sheet DM_CBNV!',
+    count: finalRecords.length,
     updatedAt: new Date().toISOString()
   });
 }
@@ -968,7 +1020,7 @@ function formatDmCbnvSheet() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName(SHEET_DM_CBNV);
   if (!sheet || sheet.getLastRow() < 1) return;
-  sheet.autoResizeColumns(1, 10);
+  sheet.autoResizeColumns(1, 11);
   SpreadsheetApp.getActiveSpreadsheet().toast('Đã định dạng lại sheet DM_CBNV!', 'THACO AUTO', 3);
 }
 

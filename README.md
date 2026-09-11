@@ -24,7 +24,7 @@ flowchart TD
 
         subgraph TABS ["Hệ thống 6 Tab Quản trị 360°"]
             T1["📋 Tab 1: Báo cáo Tổng hợp (12 Tháng & YoY 3 Năm 2024-2026)"]
-            T2["👥 Tab 2: Phân tích Định mức Chi phí / CB-NV (Mục 2.5)"]
+            T2["👥 Tab 2: Phân tích Định mức Chi phí / CB-NV"]
             T3["📊 Tab 3: Visual Dashboard 360° & AI Rolling Backtest"]
             T4["⚙️ Tab 4: Cấu hình Danh mục (B7 ↔ B10)"]
             T5["🏛️ Tab 5: Quản trị ↔ Pháp nhân (DM_QTPN)"]
@@ -96,7 +96,7 @@ flowchart TD
 - **Bộ lọc Trọng yếu (⭐):** Chuyển đổi giữa xem tất cả khoản mục hoặc chỉ xem 10 khoản mục trọng yếu chiếm 80% ngân sách.
 - **Tính năng mở rộng:** Cố định 4 cột đầu (Sticky Columns), thu gọn/mở rộng nhóm (`+`/`−`), nút Drill-down đơn vị.
 
-### 👥 Tab 2: Phân tích Định mức Chi phí / CB-NV (Mục 2.5 - Tab Độc lập Vị trí thứ 2)
+### 👥 Tab 2: Phân tích Định mức Chi phí / CB-NV (Vị trí thứ 2 sau Báo cáo)
 - **Thanh công cụ Chế độ Hiển thị:**
   - `Thực tế`: Xem theo nhân sự thực tế hiện có tại đơn vị.
   - `Định biên`: Xem theo hạn mức biên chế phê duyệt.

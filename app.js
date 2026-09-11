@@ -51,9 +51,11 @@
             thresholdPercent: 20 // Ngưỡng cảnh báo biến động bất thường (mặc định ±20%)
         },
         cbnvConfig: {
-            displayMode: 'BOTH' // 'THUC_TE' | 'DINH_BIEN' | 'BOTH'
+            displayMode: 'BOTH', // 'THUC_TE' | 'DINH_BIEN' | 'BOTH'
+            selectedPeriod: 'ALL' // 'ALL' | 1..12
         },
-        cbnvData: {}, // Record<maPn, { stt, khoi, maQt, tenQt, maPn, tenPn, nam, dinhBien, thucTe, ghiChu }>
+        cbnvRecords: [], // Mảng lưu trữ đa kỳ theo tháng: Array<{ stt, khoi, maQt, tenQt, maPn, tenPn, nam, thang, dinhBien, thucTe, ghiChu }>
+        cbnvData: {}, // Record<maPn, { stt, khoi, maQt, tenQt, maPn, tenPn, nam, thang, dinhBien, thucTe, ghiChu }> (Bản ghi xem kỳ hiện tại)
         cbnvAudit: null, // { hasControlRow, fileControlTotalDb, fileControlTotalTt, sumDb, sumTt, diff, diffDb, status }
         currentTab: 'report'
     };
@@ -801,7 +803,7 @@
         }
     }
 
-    function init() {
+    async function init() {
         purgeLegacyCaches();
 
         if (typeof THACO_APP_DATA === 'undefined') {
@@ -809,6 +811,9 @@
             alert('Không tìm thấy dữ liệu nguồn app_data.js.');
             return;
         }
+
+        // 0. Kiểm tra và áp dụng cấu hình kết nối từ URL query parameters (hỗ trợ nhúng iframe QTVP-ASDS)
+        const hasUrlConfig = checkUrlConnectionParams();
 
         // 1. Nạp baseline từ app_data.js
         state.categories = JSON.parse(JSON.stringify(THACO_APP_DATA.categories || []));
@@ -826,16 +831,33 @@
         ensureBaselineData();
         ensureBaselineCbnvData();
 
-        // 4. Khởi tạo và liên kết đồng bộ 2 chiều với Google Sheet Quan_Ly_Chi_Phi (DM_CPHC)
-        initGoogleSheetSync();
-
         setupEventListeners();
         setupMonthPicker();
         setupYearPicker();
         updateYearPickerUI();
         populateSlicers();
         ensureQtpnMappings();
-        renderAll();
+
+        // 4. Khởi tạo và liên kết đồng bộ 2 chiều với Google Sheet
+        updateGoogleSheetSyncUI();
+        const config = getGoogleSheetSyncConfig();
+
+        if (config.webAppUrl && config.webAppUrl.trim() !== '' && config.autoSync !== false) {
+            if (hasUrlConfig) {
+                // Hiển thị overlay tải dữ liệu để người dùng không nhìn thấy dữ liệu demo chớp sáng
+                showLoadingOverlay('Đang kết nối và tải dữ liệu thực tế từ Google Sheet...');
+            }
+            try {
+                console.log('Tự động kiểm tra cập nhật mới nhất từ Google Sheet...');
+                await syncFromGoogleSheet(false);
+            } finally {
+                if (hasUrlConfig) {
+                    hideLoadingOverlay();
+                }
+            }
+        } else {
+            renderAll();
+        }
 
         window.addEventListener('resize', () => {
             const activeBtn = document.querySelector('#app-tabs-nav button.text-white') || document.getElementById('tab-report-btn');
@@ -868,6 +890,7 @@
                 data2025: state.data2025,
                 compareConfig: state.compareConfig,
                 cbnvConfig: state.cbnvConfig,
+                cbnvRecords: state.cbnvRecords,
                 cbnvData: state.cbnvData,
                 cbnvAudit: state.cbnvAudit,
                 timestamp: new Date().toISOString()
@@ -939,6 +962,9 @@
                 }
                 if (saved.cbnvConfig && typeof saved.cbnvConfig === 'object') {
                     state.cbnvConfig = saved.cbnvConfig;
+                }
+                if (saved.cbnvRecords && Array.isArray(saved.cbnvRecords)) {
+                    state.cbnvRecords = saved.cbnvRecords;
                 }
                 if (saved.cbnvData && typeof saved.cbnvData === 'object') {
                     state.cbnvData = saved.cbnvData;
@@ -1012,7 +1038,7 @@
     // ==========================================
 
     const GSHEET_CONFIG_KEY = 'THACO_CPHC_GSHEET_SYNC_CONFIG_V1';
-    const APPS_SCRIPT_SOURCE_CODE = "/**\n * =========================================================================================\n * GOOGLE APPS SCRIPT: HỆ THỐNG QUẢN TRỊ CHI PHÍ HÀNH CHÍNH - THACO AUTO\n * File Google Sheet: Quan_Ly_Chi_Phi\n * (ID: 1UwV3TbvAfeLZslEazzcFWi5cXsJo98AQmxX5dXH1Pqo)\n * \n * Các Sheet quản lý:\n * 1. DM_CPHC : Cấu hình danh mục phí, mã B7, mã B10, Nhóm phí, Trọng yếu (⭐)\n * 2. DM_QTPN : Danh mục ánh xạ Quản trị ↔ Pháp nhân (TT, Khối Đơn Vị, Mã QT, Tên QT, Mã PN, Tên PN)\n * 3. CP_AUTO : Toàn bộ dữ liệu chi phí hành chính THACO AUTO (C1101 - VPĐH)\n * 4. CP_PP   : Dữ liệu chi phí hành chính Phân Phối THACO AUTO (C2305)\n * 5. CP_CTTT : Dữ liệu chi phí hành chính các Công ty Tỉnh Thành / Chi nhánh\n * =========================================================================================\n * \n * HƯỚNG DẪN TRIỂN KHAI / CẬP NHẬT (MẤT 1 PHÚT):\n * 1. Mở file Google Sheet Quan_Ly_Chi_Phi trên trình duyệt:\n *    https://docs.google.com/spreadsheets/d/1UwV3TbvAfeLZslEazzcFWi5cXsJo98AQmxX5dXH1Pqo/edit\n * 2. Vào menu \"Tiện ích mở rộng\" (Extensions) > chọn \"Apps Script\".\n * 3. Dán toàn bộ mã nguồn này đè vào file Code.gs và bấm Ctrl + S (Lưu).\n * 4. Bấm \"Triển khai\" (Deploy) > \"Quản lý bản triển khai\" (Manage deployments) hoặc \"Triển khai mới\" (New deployment).\n * 5. Chọn loại \"Ứng dụng web\" (Web app):\n *    - Thực thi dưới dạng (Execute as): \"Tôi\" (Me)\n *    - Ai có quyền truy cập (Who has access): \"Bất kỳ ai\" (Anyone)\n * 6. Bấm \"Triển khai\" (Deploy) > Sao chép \"URL ứng dụng web\" dán vào Web App.\n * =========================================================================================\n */\n\nvar SHEET_DM_CPHC = 'DM_CPHC';\nvar SHEET_DM_QTPN = 'DM_QTPN';\nvar COST_SHEETS = ['CP_AUTO', 'CP_PP', 'CP_CTTT', 'CP_VPDH', 'CP_NHAMAY', 'CP_CTTT_MB', 'CP_CTTT_MN'];\n\nvar COST_COLUMNS = [\n  'STT',\n  'Mã ĐVCS',\n  'Tên Pháp Nhân / Đơn Vị',\n  'Mã B7',\n  'Tên Khoản Mục (B7)',\n  'Nhóm Chi Phí',\n  'Mã B10',\n  'Trọng Yếu (⭐)',\n  'Mã Bộ Phận',\n  'Tên Bộ Phận',\n  'Khối Phòng Ban',\n  'Năm',\n  'Kỳ Thực Hiện',\n  'T01', 'T02', 'T03', 'T04', 'T05', 'T06',\n  'T07', 'T08', 'T09', 'T10', 'T11', 'T12',\n  'Tổng Cộng'\n];\n\n/**\n * Tạo menu THACO AUTO trong Google Sheet\n */\nfunction onOpen() {\n  SpreadsheetApp.getUi()\n    .createMenu('🚗 THACO AUTO')\n    .addItem('🔄 Kiểm tra cấu trúc DM_CPHC', 'checkDmStructure')\n    .addItem('✨ Chuẩn hóa định dạng DM_CPHC', 'formatDmSheet')\n    .addSeparator()\n    .addItem('🔄 Kiểm tra cấu trúc DM_QTPN', 'checkDmQtpnStructure')\n    .addItem('✨ Chuẩn hóa định dạng DM_QTPN', 'formatDmQtpnSheet')\n    .addSeparator()\n    .addItem('📊 Khởi tạo cấu trúc các Sheet Chi phí (CP_AUTO, CP_PP, CP_CTTT)', 'initCostSheets')\n    .addItem('✨ Chuẩn hóa định dạng các Sheet Chi phí', 'formatAllCostSheets')\n    .addToUi();\n}\n\n/**\n * =========================================================================================\n * API GET: Đọc dữ liệu từ Google Sheet về Web App\n * Hỗ trợ các chế độ:\n * 1. Mặc định hoặc ?action=get_all : Đọc TOÀN BỘ (DM_CPHC, DM_QTPN và CP_AUTO, CP_PP, CP_CTTT)\n * 2. ?action=get_dm               : Chỉ đọc danh mục DM_CPHC\n * 3. ?action=get_qtpn             : Chỉ đọc danh mục DM_QTPN\n * 4. ?action=get_cphc_data&sheet=CP_AUTO : Chỉ đọc dữ liệu của 1 sheet chi phí cụ thể\n * =========================================================================================\n */\nfunction doGet(e) {\n  try {\n    var params = e ? e.parameter || {} : {};\n    var action = params.action || 'get_all';\n    var sheetName = params.sheet || '';\n\n    // Trường hợp 1: Đọc riêng 1 sheet chi phí\n    if (action === 'get_cphc_data' && sheetName) {\n      return handleGetCostData(sheetName);\n    }\n\n    // Trường hợp 2: Đọc riêng Danh mục DM_CPHC\n    if (action === 'get_dm') {\n      return handleGetDmCphc();\n    }\n\n    // Trường hợp 3: Đọc riêng Danh mục DM_QTPN\n    if (action === 'get_qtpn') {\n      return handleGetDmQtpn();\n    }\n\n    // Trường hợp 4: Mặc định (action === 'get_all' hoặc không truyền tham số):\n    return handleGetAllData();\n\n  } catch (err) {\n    return jsonResponse({\n      status: 'error',\n      message: 'Lỗi doGet: ' + err.toString()\n    });\n  }\n}\n\n/**\n * =========================================================================================\n * API POST: Nhận dữ liệu từ Web App ghi vào Google Sheet\n * Hỗ trợ các chế độ:\n * 1. Ghi chi phí đã làm sạch: payload.action === 'save_cphc_data'\n * 2. Ghi danh mục Quản trị ↔ Pháp nhân: payload.action === 'save_qtpn' hoặc payload.qtpnMappings\n * 3. Ghi danh mục DM_CPHC: payload.action === 'save_dm' hoặc payload.categories\n * =========================================================================================\n */\nfunction doPost(e) {\n  try {\n    var raw = e.postData && e.postData.contents ? e.postData.contents : '';\n    if (!raw) {\n      return jsonResponse({ status: 'error', message: 'Dữ liệu POST rỗng.' });\n    }\n\n    var payload = JSON.parse(raw);\n\n    // Trường hợp 1: Ghi dữ liệu chi phí đã làm sạch từ Bravo (CP_AUTO / CP_PP / CP_CTTT)\n    if (payload.action === 'save_cphc_data') {\n      return handleSaveCostData(payload);\n    }\n\n    // Trường hợp 2: Ghi danh mục Quản trị ↔ Pháp nhân DM_QTPN\n    if (payload.action === 'save_qtpn' || payload.qtpnMappings) {\n      return handleSaveDmQtpn(payload);\n    }\n\n    // Trường hợp 3: Ghi danh mục DM_CPHC\n    return handleSaveDmCphc(payload);\n\n  } catch (err) {\n    return jsonResponse({\n      status: 'error',\n      message: 'Lỗi doPost: ' + err.toString()\n    });\n  }\n}\n\n/**\n * =========================================================================================\n * XỬ LÝ LẤY TOÀN BỘ DỮ LIỆU (GET_ALL)\n * =========================================================================================\n */\nfunction handleGetAllData() {\n  var ss = SpreadsheetApp.getActiveSpreadsheet();\n\n  // 1. Đọc Danh mục DM_CPHC\n  var categories = readDmCategories(ss);\n\n  // 2. Đọc Danh mục DM_QTPN\n  var qtpnMappings = readDmQtpn(ss);\n\n  // 3. Đọc các sheet chi phí\n  var costSheets = {};\n  var allCostRows = [];\n\n  COST_SHEETS.forEach(function(sName) {\n    var sRows = readSheetCostRows(ss, sName);\n    costSheets[sName] = sRows;\n    allCostRows = allCostRows.concat(sRows);\n  });\n\n  return jsonResponse({\n    status: 'success',\n    updatedAt: new Date().toISOString(),\n    categories: categories,\n    qtpnMappings: qtpnMappings,\n    costSheets: costSheets,\n    allCostRows: allCostRows,\n    totalCostRows: allCostRows.length\n  });\n}\n\n/**\n * Đọc toàn bộ danh mục từ sheet DM_CPHC\n */\nfunction readDmCategories(ss) {\n  var sheet = ss.getSheetByName(SHEET_DM_CPHC);\n  if (!sheet || sheet.getLastRow() <= 1) return [];\n\n  var data = sheet.getDataRange().getValues();\n  if (data.length <= 1) return [];\n\n  var headers = data[0];\n  var colMap = { tt: -1, group: -1, b7: -1, b10: -1, name: -1, isMaterial: -1 };\n\n  for (var c = 0; c < headers.length; c++) {\n    var h = String(headers[c] || '').toLowerCase().trim();\n    if (h.indexOf('tt') !== -1 || h.indexOf('stt') !== -1) colMap.tt = c;\n    else if (h.indexOf('nhóm') !== -1 || h.indexOf('group') !== -1) colMap.group = c;\n    else if (h.indexOf('b7') !== -1) colMap.b7 = c;\n    else if (h.indexOf('b10') !== -1) colMap.b10 = c;\n    else if (h.indexOf('tên') !== -1 || h.indexOf('khoản mục') !== -1 || h.indexOf('diễn giải') !== -1) colMap.name = c;\n    else if (h.indexOf('trọng yếu') !== -1 || h.indexOf('material') !== -1 || h.indexOf('⭐') !== -1) colMap.isMaterial = c;\n  }\n\n  if (colMap.tt === -1) colMap.tt = 0;\n  if (colMap.group === -1) colMap.group = 1;\n  if (colMap.b7 === -1) colMap.b7 = 2;\n  if (colMap.b10 === -1) colMap.b10 = 3;\n  if (colMap.name === -1) colMap.name = 4;\n  if (colMap.isMaterial === -1) colMap.isMaterial = 5;\n\n  var categories = [];\n  var currentGroup = 'Chi phí hoạt động chung';\n\n  for (var r = 1; r < data.length; r++) {\n    var row = data[r];\n    if (!row || row.every(function(cell) { return cell === '' || cell === null; })) continue;\n\n    var nameVal = String(row[colMap.name] || '').trim();\n    var b7Val = String(row[colMap.b7] || '').trim();\n    var b10Val = String(row[colMap.b10] || '').trim();\n    var grpVal = String(row[colMap.group] || '').trim();\n    var ttVal = parseInt(row[colMap.tt], 10) || (categories.length + 1);\n\n    var isMat = false;\n    if (colMap.isMaterial !== -1 && row[colMap.isMaterial]) {\n      var mStr = String(row[colMap.isMaterial]).toLowerCase().trim();\n      isMat = (mStr === 'true' || mStr === '1' || mStr === 'x' || mStr === '⭐' || mStr === 'có');\n    }\n\n    if (grpVal) currentGroup = grpVal;\n    if (!b7Val && !b10Val && !nameVal) continue;\n\n    var b7Codes = b7Val ? b7Val.split(/[,;\\s]+/).map(function(s){ return s.trim(); }).filter(Boolean) : [];\n    var b10Codes = b10Val ? b10Val.split(/[,;\\s]+/).map(function(s){ return s.trim(); }).filter(Boolean) : [];\n\n    categories.push({\n      id: r,\n      tt: ttVal,\n      group: currentGroup,\n      b7_display: b7Val,\n      b10_display: b10Val,\n      b7_codes: b7Codes,\n      b10_codes: b10Codes,\n      name: nameVal || b7Val || ('Khoản mục ' + r),\n      is_material: isMat\n    });\n  }\n\n  return categories;\n}\n\n/**\n * Đọc toàn bộ dòng chi phí từ một sheet chi phí cụ thể\n */\nfunction readSheetCostRows(ss, sheetName) {\n  var sheet = ss.getSheetByName(sheetName);\n  if (!sheet || sheet.getLastRow() <= 1) return [];\n\n  var data = sheet.getDataRange().getValues();\n  if (data.length <= 1) return [];\n\n  var headers = data[0];\n  var rows = [];\n\n  for (var r = 1; r < data.length; r++) {\n    var raw = data[r];\n    if (!raw || raw.every(function(c) { return c === '' || c === null; })) continue;\n\n    var item = {};\n    for (var c = 0; c < headers.length; c++) {\n      item[headers[c]] = raw[c];\n    }\n    rows.push(item);\n  }\n\n  return rows;\n}\n\n/**\n * =========================================================================================\n * XỬ LÝ DANH MỤC PHÍ (DM_CPHC)\n * =========================================================================================\n */\nfunction handleGetDmCphc() {\n  var ss = SpreadsheetApp.getActiveSpreadsheet();\n  var categories = readDmCategories(ss);\n\n  return jsonResponse({\n    status: 'success',\n    sheet: SHEET_DM_CPHC,\n    count: categories.length,\n    updatedAt: new Date().toISOString(),\n    categories: categories\n  });\n}\n\nfunction handleSaveDmCphc(payload) {\n  var categories = payload.categories;\n  if (!categories || !Array.isArray(categories)) {\n    return jsonResponse({ status: 'error', message: 'Mảng categories không đúng định dạng.' });\n  }\n\n  var ss = SpreadsheetApp.getActiveSpreadsheet();\n  var sheet = ss.getSheetByName(SHEET_DM_CPHC);\n  if (!sheet) {\n    sheet = ss.insertSheet(SHEET_DM_CPHC);\n  }\n\n  sheet.clear();\n\n  var headerRow = [\n    'TT',\n    'Nhóm Chi Phí',\n    'Mã Bravo 7',\n    'Mã Bravo 10',\n    'Tên Khoản Mục / Diễn Giải',\n    'Trọng yếu (⭐)'\n  ];\n\n  var rows = [headerRow];\n  categories.forEach(function(cat, index) {\n    var b7Text = cat.b7_display || (cat.b7_codes ? cat.b7_codes.join(', ') : '');\n    var b10Text = cat.b10_display || (cat.b10_codes ? cat.b10_codes.join(', ') : '');\n    var tt = cat.tt || (index + 1);\n    var grp = cat.group || 'Chi phí hoạt động chung';\n    var name = cat.name || '';\n    var mat = cat.is_material ? '⭐' : '';\n    rows.push([tt, grp, b7Text, b10Text, name, mat]);\n  });\n\n  sheet.getRange(1, 1, rows.length, 6).setValues(rows);\n\n  var headerRange = sheet.getRange(1, 1, 1, 6);\n  headerRange.setBackground('#00529C')\n             .setFontColor('#FFFFFF')\n             .setFontWeight('bold')\n             .setHorizontalAlignment('center')\n             .setVerticalAlignment('middle');\n  sheet.setRowHeight(1, 35);\n\n  if (rows.length > 1) {\n    sheet.getRange(2, 1, rows.length - 1, 1).setHorizontalAlignment('center');\n    sheet.getRange(2, 3, rows.length - 1, 2).setHorizontalAlignment('center');\n    sheet.getRange(2, 6, rows.length - 1, 1).setHorizontalAlignment('center');\n  }\n\n  sheet.setFrozenRows(1);\n  sheet.autoResizeColumns(1, 6);\n\n  return jsonResponse({\n    status: 'success',\n    message: 'Đã đồng bộ thành công ' + categories.length + ' khoản mục lên Google Sheet DM_CPHC!',\n    count: categories.length,\n    updatedAt: new Date().toISOString()\n  });\n}\n\n/**\n * =========================================================================================\n * XỬ LÝ QUẢN TRỊ ↔ PHÁP NHÂN (DM_QTPN)\n * =========================================================================================\n */\nfunction handleGetDmQtpn() {\n  var ss = SpreadsheetApp.getActiveSpreadsheet();\n  var mappings = readDmQtpn(ss);\n\n  return jsonResponse({\n    status: 'success',\n    sheet: SHEET_DM_QTPN,\n    count: mappings.length,\n    updatedAt: new Date().toISOString(),\n    qtpnMappings: mappings\n  });\n}\n\nfunction readDmQtpn(ss) {\n  var sheet = ss.getSheetByName(SHEET_DM_QTPN);\n  if (!sheet || sheet.getLastRow() <= 1) return [];\n\n  var data = sheet.getDataRange().getValues();\n  if (data.length <= 1) return [];\n\n  var headers = data[0].map(function(h) { return String(h || '').trim().toLowerCase(); });\n  var colMap = { tt: 0, khoi: -1, maQt: -1, tenQt: -1, maPn: -1, tenPn: -1 };\n\n  for (var c = 0; c < headers.length; c++) {\n    var h = headers[c];\n    if (h.indexOf('khối') !== -1 || h.indexOf('khoi') !== -1 || (h.indexOf('đơn vị') !== -1 && h.indexOf('quản trị') === -1)) colMap.khoi = c;\n    else if (h.indexOf('mã quản trị') !== -1 || h.indexOf('ma quan tri') !== -1 || h.indexOf('mã qt') !== -1) colMap.maQt = c;\n    else if (h.indexOf('tên quản trị') !== -1 || h.indexOf('ten quan tri') !== -1 || h.indexOf('đơn vị quản trị') !== -1 || h.indexOf('tên qt') !== -1) colMap.tenQt = c;\n    else if (h.indexOf('mã pháp nhân') !== -1 || h.indexOf('ma phap nhan') !== -1 || h.indexOf('mã đvcs') !== -1 || h.indexOf('mã pn') !== -1) colMap.maPn = c;\n    else if (h.indexOf('tên pháp nhân') !== -1 || h.indexOf('ten phap nhan') !== -1 || h.indexOf('tên đvcs') !== -1 || h.indexOf('tên pn') !== -1 || h.indexOf('showroom') !== -1) colMap.tenPn = c;\n  }\n\n  var is6Cols = data[0].length >= 6;\n  if (colMap.khoi === -1) colMap.khoi = is6Cols ? 1 : -1;\n  if (colMap.maQt === -1) colMap.maQt = is6Cols ? 2 : 1;\n  if (colMap.tenQt === -1) colMap.tenQt = is6Cols ? 3 : 2;\n  if (colMap.maPn === -1) colMap.maPn = is6Cols ? 4 : 3;\n  if (colMap.tenPn === -1) colMap.tenPn = is6Cols ? 5 : 4;\n\n  var mappings = [];\n  for (var r = 1; r < data.length; r++) {\n    var row = data[r];\n    if (!row || row.every(function(cell) { return cell === '' || cell === null; })) continue;\n\n    var khoi = colMap.khoi !== -1 ? String(row[colMap.khoi] || '').trim() : 'VPĐH';\n    var maQt = String(row[colMap.maQt] || '').trim();\n    var tenQt = String(row[colMap.tenQt] || '').trim();\n    var maPn = String(row[colMap.maPn] || '').trim();\n    var tenPn = String(row[colMap.tenPn] || '').trim();\n\n    if (!maQt && !tenQt && !maPn && !tenPn) continue;\n\n    mappings.push({\n      stt: parseInt(row[colMap.tt], 10) || (mappings.length + 1),\n      khoi: khoi || 'VPĐH',\n      maQt: maQt,\n      tenQt: tenQt,\n      maPn: maPn,\n      tenPn: tenPn\n    });\n  }\n\n  return mappings;\n}\n\nfunction handleSaveDmQtpn(payload) {\n  var mappings = payload.qtpnMappings || payload.mappings;\n  if (!mappings || !Array.isArray(mappings)) {\n    return jsonResponse({ status: 'error', message: 'Mảng qtpnMappings không đúng định dạng.' });\n  }\n\n  var ss = SpreadsheetApp.getActiveSpreadsheet();\n  var sheet = ss.getSheetByName(SHEET_DM_QTPN);\n  if (!sheet) {\n    sheet = ss.insertSheet(SHEET_DM_QTPN);\n  }\n\n  sheet.clear();\n\n  var headerRow = [\n    'TT',\n    'Khối Đơn Vị',\n    'Mã Quản trị',\n    'Tên Quản trị',\n    'Mã pháp nhân',\n    'Tên pháp nhân'\n  ];\n\n  var rows = [headerRow];\n  mappings.forEach(function(item, index) {\n    var tt = item.stt || (index + 1);\n    var khoi = item.khoi || 'VPĐH';\n    var maQt = item.maQt || item.maQuanti || '';\n    var tenQt = item.tenQt || item.tenQuanti || '';\n    var maPn = item.maPn || item.maPhapNhan || '';\n    var tenPn = item.tenPn || item.tenPhapNhan || '';\n    rows.push([tt, khoi, maQt, tenQt, maPn, tenPn]);\n  });\n\n  sheet.getRange(1, 1, rows.length, 6).setValues(rows);\n\n  var headerRange = sheet.getRange(1, 1, 1, 6);\n  headerRange.setBackground('#00529C')\n             .setFontColor('#FFFFFF')\n             .setFontWeight('bold')\n             .setHorizontalAlignment('center')\n             .setVerticalAlignment('middle');\n  sheet.setRowHeight(1, 35);\n\n  if (rows.length > 1) {\n    sheet.getRange(2, 1, rows.length - 1, 1).setHorizontalAlignment('center');\n    sheet.getRange(2, 2, rows.length - 1, 1).setHorizontalAlignment('center');\n    sheet.getRange(2, 3, rows.length - 1, 1).setHorizontalAlignment('center');\n    sheet.getRange(2, 5, rows.length - 1, 1).setHorizontalAlignment('center');\n  }\n\n  sheet.setFrozenRows(1);\n  sheet.autoResizeColumns(1, 6);\n\n  return jsonResponse({\n    status: 'success',\n    message: 'Đã đồng bộ thành công ' + mappings.length + ' dòng ánh xạ lên Google Sheet DM_QTPN!',\n    count: mappings.length,\n    updatedAt: new Date().toISOString()\n  });\n}\n\n/**\n * =========================================================================================\n * XỬ LÝ CHI PHÍ ĐÃ LÀM SẠCH (CP_AUTO / CP_PP / CP_CTTT)\n * =========================================================================================\n */\nfunction handleGetCostData(sheetName) {\n  var ss = SpreadsheetApp.getActiveSpreadsheet();\n  var sheet = ss.getSheetByName(sheetName);\n  if (!sheet) {\n    return jsonResponse({\n      status: 'error',\n      message: 'Sheet \"' + sheetName + '\" chưa tồn tại trên file này.'\n    });\n  }\n\n  var rows = readSheetCostRows(ss, sheetName);\n\n  return jsonResponse({\n    status: 'success',\n    sheet: sheetName,\n    count: rows.length,\n    rows: rows\n  });\n}\n\nfunction handleSaveCostData(payload) {\n  var targetSheet = payload.targetSheet || 'CP_AUTO';\n  if (COST_SHEETS.indexOf(targetSheet) === -1) {\n    targetSheet = 'CP_AUTO';\n  }\n\n  var newRows = payload.rows;\n  if (!newRows || !Array.isArray(newRows)) {\n    return jsonResponse({ status: 'error', message: 'Mảng rows không đúng định dạng.' });\n  }\n\n  var entityCode = payload.entityCode ? String(payload.entityCode).trim() : '';\n  var year = payload.year ? parseInt(payload.year, 10) : null;\n  var mode = payload.mode || 'replace_year_entity'; // 'replace_year_entity' | 'overwrite' | 'append'\n\n  var ss = SpreadsheetApp.getActiveSpreadsheet();\n  var sheet = ss.getSheetByName(targetSheet);\n  if (!sheet) {\n    sheet = ss.insertSheet(targetSheet);\n  }\n\n  var existingValues = [];\n  if (sheet.getLastRow() > 1 && mode === 'replace_year_entity') {\n    existingValues = sheet.getRange(2, 1, sheet.getLastRow() - 1, COST_COLUMNS.length).getValues();\n  }\n\n  var preservedRows = [];\n  if (mode === 'replace_year_entity' && existingValues.length > 0) {\n    preservedRows = existingValues.filter(function(row) {\n      var rowEntity = String(row[1] || '').trim(); // Cột 2: Mã ĐVCS\n      var rowYear = parseInt(row[11], 10);        // Cột 12: Năm\n      if (entityCode && year) {\n        return !(rowEntity === entityCode && rowYear === year);\n      } else if (year) {\n        return rowYear !== year;\n      } else if (entityCode) {\n        return rowEntity !== entityCode;\n      }\n      return false;\n    });\n  }\n\n  // Chuẩn hóa dữ liệu mới thành mảng 2 chiều theo đúng 26 cột COST_COLUMNS\n  var formattedNewRows = newRows.map(function(item) {\n    if (Array.isArray(item)) return item;\n\n    var months = item.months || [0,0,0,0,0,0,0,0,0,0,0,0];\n    var totalVal = typeof item.total === 'number' ? item.total : months.reduce(function(a,b){ return a + (b||0); }, 0);\n\n    return [\n      item.stt || '',\n      item.entityCode || entityCode || 'C1101',\n      item.entityName || 'THACO AUTO',\n      item.km || item.b7 || '',\n      item.tenKm || item.name || '',\n      item.nhom || 'Chi phí hoạt động chung',\n      item.b10 || '',\n      item.isMaterial ? '⭐' : '',\n      item.bp || '',\n      item.tenBp || '',\n      item.khoiPb || '',\n      item.year || year || 2026,\n      item.ky || (item.year === 2025 ? 'Cả năm' : 'T1 - T7'),\n      months[0] || 0,\n      months[1] || 0,\n      months[2] || 0,\n      months[3] || 0,\n      months[4] || 0,\n      months[5] || 0,\n      months[6] || 0,\n      months[7] || 0,\n      months[8] || 0,\n      months[9] || 0,\n      months[10] || 0,\n      months[11] || 0,\n      totalVal\n    ];\n  });\n\n  var finalDataRows = preservedRows.concat(formattedNewRows);\n\n  // Đánh lại số thứ tự STT\n  finalDataRows.forEach(function(r, idx) {\n    r[0] = idx + 1;\n  });\n\n  // Ghi toàn bộ dữ liệu (Header + Rows)\n  sheet.clear();\n  var writeArray = [COST_COLUMNS].concat(finalDataRows);\n\n  var numRows = writeArray.length;\n  var numCols = COST_COLUMNS.length;\n\n  sheet.getRange(1, 1, numRows, numCols).setValues(writeArray);\n\n  // Định dạng tiêu đề THACO Royal Blue #00529C\n  var headerRange = sheet.getRange(1, 1, 1, numCols);\n  headerRange.setBackground('#00529C')\n             .setFontColor('#FFFFFF')\n             .setFontWeight('bold')\n             .setHorizontalAlignment('center')\n             .setVerticalAlignment('middle');\n  sheet.setRowHeight(1, 35);\n\n  if (numRows > 1) {\n    // Căn giữa các cột mã số, năm, kỳ\n    sheet.getRange(2, 1, numRows - 1, 1).setHorizontalAlignment('center'); // STT\n    sheet.getRange(2, 2, numRows - 1, 1).setHorizontalAlignment('center'); // Mã ĐVCS\n    sheet.getRange(2, 4, numRows - 1, 1).setHorizontalAlignment('center'); // Mã B7\n    sheet.getRange(2, 7, numRows - 1, 2).setHorizontalAlignment('center'); // Mã B10, Trọng yếu\n    sheet.getRange(2, 9, numRows - 1, 1).setHorizontalAlignment('center'); // Mã BP\n    sheet.getRange(2, 11, numRows - 1, 3).setHorizontalAlignment('center'); // Khối PB, Năm, Kỳ\n\n    // Định dạng số tiền (cột T01 đến Tổng Cộng) dạng phân cách hàng ngàn #,##0\n    var moneyRange = sheet.getRange(2, 14, numRows - 1, 13);\n    moneyRange.setNumberFormat('#,##0').setHorizontalAlignment('right');\n  }\n\n  sheet.setFrozenRows(1);\n  sheet.setFrozenColumns(5); // Cố định 5 cột đầu (STT, Mã ĐVCS, Đơn vị, Mã B7, Tên Khoản Mục)\n  sheet.autoResizeColumns(1, numCols);\n\n  var totalMoney = formattedNewRows.reduce(function(acc, r) { return acc + (Number(r[25]) || 0); }, 0);\n\n  return jsonResponse({\n    status: 'success',\n    sheet: targetSheet,\n    mode: mode,\n    newRowsCount: formattedNewRows.length,\n    totalRowsInSheet: finalDataRows.length,\n    totalMoneyVND: totalMoney,\n    message: 'Đã lưu thành công ' + formattedNewRows.length + ' dòng dữ liệu vào sheet ' + targetSheet + ' (Tổng tiền: ' + totalMoney.toLocaleString('vi-VN') + ' đ)!'\n  });\n}\n\n/**\n * =========================================================================================\n * CÁC HÀM TIỆN ÍCH MENU CHO NGƯỜI DÙNG TRÊN GOOGLE SHEET\n * =========================================================================================\n */\nfunction checkDmStructure() {\n  var ss = SpreadsheetApp.getActiveSpreadsheet();\n  var sheet = ss.getSheetByName(SHEET_DM_CPHC);\n  if (!sheet) {\n    SpreadsheetApp.getUi().alert('Chưa có sheet \"' + SHEET_DM_CPHC + '\". Hãy bấm đồng bộ từ Web App để tự động tạo.');\n    return;\n  }\n  var count = Math.max(0, sheet.getLastRow() - 1);\n  SpreadsheetApp.getUi().alert('Sheet DM_CPHC đang có ' + count + ' khoản mục chi phí.');\n}\n\nfunction formatDmSheet() {\n  var ss = SpreadsheetApp.getActiveSpreadsheet();\n  var sheet = ss.getSheetByName(SHEET_DM_CPHC);\n  if (!sheet || sheet.getLastRow() < 1) return;\n  sheet.autoResizeColumns(1, 6);\n  SpreadsheetApp.getActiveSpreadsheet().toast('Đã định dạng lại sheet DM_CPHC!', 'THACO AUTO', 3);\n}\n\nfunction checkDmQtpnStructure() {\n  var ss = SpreadsheetApp.getActiveSpreadsheet();\n  var sheet = ss.getSheetByName(SHEET_DM_QTPN);\n  if (!sheet) {\n    SpreadsheetApp.getUi().alert('Chưa có sheet \"' + SHEET_DM_QTPN + '\". Hãy bấm đồng bộ từ Web App để tự động tạo.');\n    return;\n  }\n  var count = Math.max(0, sheet.getLastRow() - 1);\n  SpreadsheetApp.getUi().alert('Sheet DM_QTPN đang có ' + count + ' dòng ánh xạ.');\n}\n\nfunction formatDmQtpnSheet() {\n  var ss = SpreadsheetApp.getActiveSpreadsheet();\n  var sheet = ss.getSheetByName(SHEET_DM_QTPN);\n  if (!sheet || sheet.getLastRow() < 1) return;\n  sheet.autoResizeColumns(1, 6);\n  SpreadsheetApp.getActiveSpreadsheet().toast('Đã định dạng lại sheet DM_QTPN!', 'THACO AUTO', 3);\n}\n\nfunction initCostSheets() {\n  var ss = SpreadsheetApp.getActiveSpreadsheet();\n  COST_SHEETS.forEach(function(sName) {\n    var sh = ss.getSheetByName(sName);\n    if (!sh) {\n      sh = ss.insertSheet(sName);\n      sh.getRange(1, 1, 1, COST_COLUMNS.length).setValues([COST_COLUMNS]);\n      sh.getRange(1, 1, 1, COST_COLUMNS.length)\n        .setBackground('#00529C')\n        .setFontColor('#FFFFFF')\n        .setFontWeight('bold')\n        .setHorizontalAlignment('center');\n      sh.setRowHeight(1, 35);\n      sh.setFrozenRows(1);\n      sh.setFrozenColumns(5);\n      sh.autoResizeColumns(1, COST_COLUMNS.length);\n    }\n  });\n  SpreadsheetApp.getUi().alert('Đã khởi tạo xong các sheet: ' + COST_SHEETS.join(', '));\n}\n\nfunction formatAllCostSheets() {\n  var ss = SpreadsheetApp.getActiveSpreadsheet();\n  COST_SHEETS.forEach(function(sName) {\n    var sh = ss.getSheetByName(sName);\n    if (sh && sh.getLastRow() > 0) {\n      sh.autoResizeColumns(1, COST_COLUMNS.length);\n      sh.setFrozenRows(1);\n      sh.setFrozenColumns(5);\n    }\n  });\n  SpreadsheetApp.getActiveSpreadsheet().toast('Đã chuẩn hóa định dạng các sheet chi phí!', 'THACO AUTO', 3);\n}\n\nfunction jsonResponse(obj) {\n  return ContentService\n    .createTextOutput(JSON.stringify(obj))\n    .setMimeType(ContentService.MimeType.JSON);\n}\n";
+    const APPS_SCRIPT_SOURCE_CODE = "/**\n * =========================================================================================\n * GOOGLE APPS SCRIPT: HỆ THỐNG QUẢN TRỊ CHI PHÍ HÀNH CHÍNH - THACO AUTO\n * File Google Sheet: Quan_Ly_Chi_Phi\n * (ID: 1UwV3TbvAfeLZslEazzcFWi5cXsJo98AQmxX5dXH1Pqo)\n * \n * Các Sheet quản lý:\n * 1. DM_CPHC : Cấu hình danh mục phí, mã B7, mã B10, Nhóm phí, Trọng yếu (⭐)\n * 2. DM_QTPN : Danh mục ánh xạ Quản trị ↔ Pháp nhân (TT, Mã QT, Tên QT, Mã PN, Tên PN)\n * 3. CP_AUTO : Toàn bộ dữ liệu chi phí hành chính THACO AUTO (C1101 - VPĐH)\n * 4. CP_PP   : Dữ liệu chi phí hành chính Phân Phối THACO AUTO\n * 5. CP_CTTT : Dữ liệu chi phí hành chính các Công ty Tỉnh Thành / Chi nhánh\n * =========================================================================================\n * \n * HƯỚNG DẪN TRIỂN KHAI / CẬP NHẬT (MẤT 1 PHÚT):\n * 1. Mở file Google Sheet Quan_Ly_Chi_Phi trên trình duyệt:\n *    https://docs.google.com/spreadsheets/d/1UwV3TbvAfeLZslEazzcFWi5cXsJo98AQmxX5dXH1Pqo/edit\n * 2. Vào menu \"Tiện ích mở rộng\" (Extensions) > chọn \"Apps Script\".\n * 3. Dán toàn bộ mã nguồn này đè vào file Code.gs và bấm Ctrl + S (Lưu).\n * 4. Bấm \"Triển khai\" (Deploy) > \"Quản lý bản triển khai\" (Manage deployments) hoặc \"Triển khai mới\" (New deployment).\n * 5. Chọn loại \"Ứng dụng web\" (Web app):\n *    - Thực thi dưới dạng (Execute as): \"Tôi\" (Me)\n *    - Ai có quyền truy cập (Who has access): \"Bất kỳ ai\" (Anyone)\n * 6. Bấm \"Triển khai\" (Deploy) > Sao chép \"URL ứng dụng web\" dán vào Web App.\n * =========================================================================================\n */\n\nvar SHEET_DM_CPHC = 'DM_CPHC';\nvar SHEET_DM_QTPN = 'DM_QTPN';\nvar SHEET_DM_CBNV = 'DM_CBNV';\nvar COST_SHEETS = ['CP_AUTO', 'CP_PP', 'CP_CTTT', 'CP_VPDH', 'CP_NHAMAY', 'CP_CTTT_MB', 'CP_CTTT_MN'];\n\nvar CBNV_COLUMNS = [\n  'STT',\n  'Khối Đơn Vị',\n  'Mã Quản trị',\n  'Tên Quản trị',\n  'Mã ĐVCS',\n  'Tên Pháp Nhân / Showroom',\n  'Năm',\n  'Tháng',\n  'Định Biên (Người)',\n  'Thực Tế (Người)',\n  'Ghi Chú'\n];\n\nvar SCRIPT_PROP_API_KEY = 'API_KEY';\nvar DEFAULT_SEED_API_KEY = 'THACO_CPHC_2026_SECURE_TOKEN';\n\n/**\n * Lấy khóa API_KEY từ Script Properties, tự động khởi tạo nếu chưa có\n */\nfunction getOrInitApiKey() {\n  var props = PropertiesService.getScriptProperties();\n  var key = props.getProperty(SCRIPT_PROP_API_KEY);\n  if (!key) {\n    key = DEFAULT_SEED_API_KEY;\n    props.setProperty(SCRIPT_PROP_API_KEY, key);\n  }\n  return key;\n}\n\n/**\n * Kiểm tra tính hợp lệ của API_KEY trong request GET hoặc POST\n */\nfunction checkApiKey(e, payload) {\n  var configuredKey = getOrInitApiKey();\n  var providedKey = '';\n\n  if (e && e.parameter) {\n    providedKey = e.parameter.api_key || e.parameter.apiKey || e.parameter.key || '';\n  }\n  if (!providedKey && payload) {\n    providedKey = payload.api_key || payload.apiKey || payload.key || '';\n  }\n\n  return Boolean(providedKey && String(providedKey).trim() === String(configuredKey).trim());\n}\n\nvar COST_COLUMNS = [\n  'STT',\n  'Mã ĐVCS',\n  'Tên Pháp Nhân / Đơn Vị',\n  'Mã B7',\n  'Tên Khoản Mục (B7)',\n  'Nhóm Chi Phí',\n  'Mã B10',\n  'Trọng Yếu (⭐)',\n  'Mã Bộ Phận',\n  'Tên Bộ Phận',\n  'Khối Phòng Ban',\n  'Năm',\n  'Kỳ Thực Hiện',\n  'T01', 'T02', 'T03', 'T04', 'T05', 'T06',\n  'T07', 'T08', 'T09', 'T10', 'T11', 'T12',\n  'Tổng Cộng'\n];\n\n/**\n * Tạo menu THACO AUTO trong Google Sheet\n */\nfunction onOpen() {\n  SpreadsheetApp.getUi()\n    .createMenu('🚗 THACO AUTO')\n    .addItem('🔐 Kiểm tra / Đổi khóa bảo mật API_KEY', 'manageApiKeyMenu')\n    .addSeparator()\n    .addItem('🔄 Kiểm tra cấu trúc DM_CPHC', 'checkDmStructure')\n    .addItem('✨ Chuẩn hóa định dạng DM_CPHC', 'formatDmSheet')\n    .addSeparator()\n    .addItem('🔄 Kiểm tra cấu trúc DM_QTPN', 'checkDmQtpnStructure')\n    .addItem('✨ Chuẩn hóa định dạng DM_QTPN', 'formatDmQtpnSheet')\n    .addSeparator()\n    .addItem('🔄 Kiểm tra cấu trúc DM_CBNV', 'checkDmCbnvStructure')\n    .addItem('✨ Chuẩn hóa định dạng DM_CBNV', 'formatDmCbnvSheet')\n    .addSeparator()\n    .addItem('📊 Khởi tạo cấu trúc các Sheet Chi phí (CP_AUTO, CP_PP, CP_CTTT)', 'initCostSheets')\n    .addItem('✨ Chuẩn hóa định dạng các Sheet Chi phí', 'formatAllCostSheets')\n    .addToUi();\n}\n\n/**\n * Hàm quản trị khóa API_KEY trực tiếp từ Menu Google Sheet\n */\nfunction manageApiKeyMenu() {\n  var ui = SpreadsheetApp.getUi();\n  var currentKey = getOrInitApiKey();\n\n  var res = ui.prompt(\n    '🔐 QUẢN TRỊ KHÓA BẢO MẬT API_KEY (THACO AUTO)',\n    'Khóa API_KEY hiện tại:\\n' + currentKey + '\\n\\nNhập khóa API_KEY mới (hoặc bấm Hủy để giữ nguyên):',\n    ui.ButtonSet.OK_CANCEL\n  );\n\n  if (res.getSelectedButton() === ui.Button.OK) {\n    var newKey = res.getResponseText().trim();\n    if (!newKey) {\n      ui.alert('⚠️ Khóa API_KEY không được để trống.');\n      return;\n    }\n    PropertiesService.getScriptProperties().setProperty(SCRIPT_PROP_API_KEY, newKey);\n    ui.alert('✅ Đã cập nhật khóa API_KEY thành công!\\n\\nKhóa mới: ' + newKey + '\\n\\nVui lòng cập nhật khóa này vào Web App trong mục \"Cài đặt kết nối\".');\n  }\n}\n\n/**\n * =========================================================================================\n * API GET: Đọc dữ liệu từ Google Sheet về Web App\n * Hỗ trợ các chế độ:\n * 1. Mặc định hoặc ?action=get_all : Đọc TOÀN BỘ (DM_CPHC, DM_QTPN và CP_AUTO, CP_PP, CP_CTTT)\n * 2. ?action=get_dm               : Chỉ đọc danh mục DM_CPHC\n * 3. ?action=get_qtpn             : Chỉ đọc danh mục DM_QTPN\n * 4. ?action=get_cphc_data&sheet=CP_AUTO : Chỉ đọc dữ liệu của 1 sheet chi phí cụ thể\n * 5. ?action=test_key             : Kiểm tra xác thực khóa API_KEY\n * =========================================================================================\n */\nfunction doGet(e) {\n  try {\n    var params = e ? e.parameter || {} : {};\n\n    // 🔒 LỚP BẢO MẬT: Kiểm tra API_KEY trước khi xử lý bất kỳ yêu cầu nào\n    if (!checkApiKey(e, null)) {\n      return jsonResponse({\n        status: 'error',\n        code: 401,\n        message: 'Từ chối truy cập: Khóa API_KEY không hợp lệ hoặc chưa được cung cấp. Vui lòng kiểm tra lại cấu hình kết nối trên Web App.'\n      });\n    }\n\n    var action = params.action || 'get_all';\n    var sheetName = params.sheet || '';\n\n    // Kiểm tra kết nối nhanh (Ping/Test key)\n    if (action === 'test_key' || action === 'ping') {\n      return jsonResponse({\n        status: 'success',\n        message: 'Xác thực API_KEY thành công! Kết nối bảo mật hoạt động chuẩn xác.',\n        authenticated: true,\n        timestamp: new Date().toISOString()\n      });\n    }\n\n    // Trường hợp 1: Đọc riêng 1 sheet chi phí\n    if (action === 'get_cphc_data' && sheetName) {\n      return handleGetCostData(sheetName);\n    }\n\n    // Trường hợp 2: Đọc riêng Danh mục DM_CPHC\n    if (action === 'get_dm') {\n      return handleGetDmCphc();\n    }\n\n    // Trường hợp 3: Đọc riêng Danh mục DM_QTPN\n    if (action === 'get_qtpn') {\n      return handleGetDmQtpn();\n    }\n\n    // Trường hợp 4: Đọc riêng Danh mục Định biên / Nhân sự DM_CBNV\n    if (action === 'get_cbnv') {\n      return handleGetDmCbnv();\n    }\n\n    // Trường hợp 5: Mặc định (action === 'get_all' hoặc không truyền tham số):\n    return handleGetAllData();\n\n  } catch (err) {\n    return jsonResponse({\n      status: 'error',\n      message: 'Lỗi doGet: ' + err.toString()\n    });\n  }\n}\n\n/**\n * =========================================================================================\n * API POST: Nhận dữ liệu từ Web App ghi vào Google Sheet\n * Hỗ trợ các chế độ:\n * 1. Ghi chi phí đã làm sạch: payload.action === 'save_cphc_data'\n * 2. Ghi danh mục Quản trị ↔ Pháp nhân: payload.action === 'save_qtpn' hoặc payload.qtpnMappings\n * 3. Ghi danh mục Định biên / Nhân sự: payload.action === 'save_cbnv' hoặc payload.cbnvData\n * 4. Ghi danh mục DM_CPHC: payload.action === 'save_dm' hoặc payload.categories\n * =========================================================================================\n */\nfunction doPost(e) {\n  try {\n    var raw = e.postData && e.postData.contents ? e.postData.contents : '';\n    if (!raw) {\n      return jsonResponse({ status: 'error', message: 'Dữ liệu POST rỗng.' });\n    }\n\n    var payload = JSON.parse(raw);\n\n    // 🔒 LỚP BẢO MẬT: Kiểm tra API_KEY trước khi thực hiện bất kỳ thao tác ghi/xóa nào\n    if (!checkApiKey(e, payload)) {\n      return jsonResponse({\n        status: 'error',\n        code: 401,\n        message: 'Từ chối truy cập: Khóa API_KEY không hợp lệ hoặc chưa được cung cấp. Thao tác ghi dữ liệu bị chặn.'\n      });\n    }\n\n    // Trường hợp 1: Ghi dữ liệu chi phí đã làm sạch từ Bravo (CP_AUTO / CP_PP / CP_CTTT)\n    if (payload.action === 'save_cphc_data') {\n      return handleSaveCostData(payload);\n    }\n\n    // Trường hợp 2: Ghi danh mục Quản trị ↔ Pháp nhân DM_QTPN\n    if (payload.action === 'save_qtpn' || payload.qtpnMappings) {\n      return handleSaveDmQtpn(payload);\n    }\n\n    // Trường hợp 3: Ghi danh mục Định biên / Nhân sự DM_CBNV\n    if (payload.action === 'save_cbnv' || payload.cbnvData) {\n      return handleSaveDmCbnv(payload);\n    }\n\n    // Trường hợp 4: Ghi danh mục DM_CPHC\n    return handleSaveDmCphc(payload);\n\n  } catch (err) {\n    return jsonResponse({\n      status: 'error',\n      message: 'Lỗi doPost: ' + err.toString()\n    });\n  }\n}\n\n/**\n * =========================================================================================\n * XỬ LÝ LẤY TOÀN BỘ DỮ LIỆU (GET_ALL)\n * =========================================================================================\n */\nfunction handleGetAllData() {\n  var ss = SpreadsheetApp.getActiveSpreadsheet();\n\n  // 1. Đọc Danh mục DM_CPHC\n  var categories = readDmCategories(ss);\n\n  // 2. Đọc Danh mục DM_QTPN\n  var qtpnMappings = readDmQtpn(ss);\n\n  // 3. Đọc Danh mục Định biên / Nhân sự DM_CBNV\n  var cbnvData = readDmCbnv(ss);\n\n  // 4. Đọc các sheet chi phí\n  var costSheets = {};\n  var allCostRows = [];\n\n  COST_SHEETS.forEach(function(sName) {\n    var sRows = readSheetCostRows(ss, sName);\n    costSheets[sName] = sRows;\n    allCostRows = allCostRows.concat(sRows);\n  });\n\n  return jsonResponse({\n    status: 'success',\n    updatedAt: new Date().toISOString(),\n    categories: categories,\n    qtpnMappings: qtpnMappings,\n    cbnvData: cbnvData,\n    costSheets: costSheets,\n    allCostRows: allCostRows,\n    totalCostRows: allCostRows.length\n  });\n}\n\n/**\n * Đọc toàn bộ danh mục từ sheet DM_CPHC\n */\nfunction readDmCategories(ss) {\n  var sheet = ss.getSheetByName(SHEET_DM_CPHC);\n  if (!sheet || sheet.getLastRow() <= 1) return [];\n\n  var data = sheet.getDataRange().getValues();\n  if (data.length <= 1) return [];\n\n  var headers = data[0];\n  var colMap = { tt: -1, group: -1, b7: -1, b10: -1, name: -1, isMaterial: -1 };\n\n  for (var c = 0; c < headers.length; c++) {\n    var h = String(headers[c] || '').toLowerCase().trim();\n    if (h.indexOf('tt') !== -1 || h.indexOf('stt') !== -1) colMap.tt = c;\n    else if (h.indexOf('nhóm') !== -1 || h.indexOf('group') !== -1) colMap.group = c;\n    else if (h.indexOf('b7') !== -1) colMap.b7 = c;\n    else if (h.indexOf('b10') !== -1) colMap.b10 = c;\n    else if (h.indexOf('tên') !== -1 || h.indexOf('khoản mục') !== -1 || h.indexOf('diễn giải') !== -1) colMap.name = c;\n    else if (h.indexOf('trọng yếu') !== -1 || h.indexOf('material') !== -1 || h.indexOf('⭐') !== -1) colMap.isMaterial = c;\n  }\n\n  if (colMap.tt === -1) colMap.tt = 0;\n  if (colMap.group === -1) colMap.group = 1;\n  if (colMap.b7 === -1) colMap.b7 = 2;\n  if (colMap.b10 === -1) colMap.b10 = 3;\n  if (colMap.name === -1) colMap.name = 4;\n  if (colMap.isMaterial === -1) colMap.isMaterial = 5;\n\n  var categories = [];\n  var currentGroup = 'Chi phí hoạt động chung';\n\n  for (var r = 1; r < data.length; r++) {\n    var row = data[r];\n    if (!row || row.every(function(cell) { return cell === '' || cell === null; })) continue;\n\n    var nameVal = String(row[colMap.name] || '').trim();\n    var b7Val = String(row[colMap.b7] || '').trim();\n    var b10Val = String(row[colMap.b10] || '').trim();\n    var grpVal = String(row[colMap.group] || '').trim();\n    var ttVal = parseInt(row[colMap.tt], 10) || (categories.length + 1);\n\n    var isMat = false;\n    if (colMap.isMaterial !== -1 && row[colMap.isMaterial]) {\n      var mStr = String(row[colMap.isMaterial]).toLowerCase().trim();\n      isMat = (mStr === 'true' || mStr === '1' || mStr === 'x' || mStr === '⭐' || mStr === 'có');\n    }\n\n    if (grpVal) currentGroup = grpVal;\n    if (!b7Val && !b10Val && !nameVal) continue;\n\n    var b7Codes = b7Val ? b7Val.split(/[,;\\s]+/).map(function(s){ return s.trim(); }).filter(Boolean) : [];\n    var b10Codes = b10Val ? b10Val.split(/[,;\\s]+/).map(function(s){ return s.trim(); }).filter(Boolean) : [];\n\n    categories.push({\n      id: r,\n      tt: ttVal,\n      group: currentGroup,\n      b7_display: b7Val,\n      b10_display: b10Val,\n      b7_codes: b7Codes,\n      b10_codes: b10Codes,\n      name: nameVal || b7Val || ('Khoản mục ' + r),\n      is_material: isMat\n    });\n  }\n\n  return categories;\n}\n\n/**\n * Đọc toàn bộ dòng chi phí từ một sheet chi phí cụ thể\n */\nfunction readSheetCostRows(ss, sheetName) {\n  var sheet = ss.getSheetByName(sheetName);\n  if (!sheet || sheet.getLastRow() <= 1) return [];\n\n  var data = sheet.getDataRange().getValues();\n  if (data.length <= 1) return [];\n\n  var headers = data[0];\n  var rows = [];\n\n  for (var r = 1; r < data.length; r++) {\n    var raw = data[r];\n    if (!raw || raw.every(function(c) { return c === '' || c === null; })) continue;\n\n    var item = {};\n    for (var c = 0; c < headers.length; c++) {\n      item[headers[c]] = raw[c];\n    }\n    rows.push(item);\n  }\n\n  return rows;\n}\n\n/**\n * =========================================================================================\n * XỬ LÝ DANH MỤC PHÍ (DM_CPHC)\n * =========================================================================================\n */\nfunction handleGetDmCphc() {\n  var ss = SpreadsheetApp.getActiveSpreadsheet();\n  var categories = readDmCategories(ss);\n\n  return jsonResponse({\n    status: 'success',\n    sheet: SHEET_DM_CPHC,\n    count: categories.length,\n    updatedAt: new Date().toISOString(),\n    categories: categories\n  });\n}\n\nfunction handleSaveDmCphc(payload) {\n  var categories = payload.categories;\n  if (!categories || !Array.isArray(categories)) {\n    return jsonResponse({ status: 'error', message: 'Mảng categories không đúng định dạng.' });\n  }\n\n  var ss = SpreadsheetApp.getActiveSpreadsheet();\n  var sheet = ss.getSheetByName(SHEET_DM_CPHC);\n  if (!sheet) {\n    sheet = ss.insertSheet(SHEET_DM_CPHC);\n  }\n\n  sheet.clear();\n\n  var headerRow = [\n    'TT',\n    'Nhóm Chi Phí',\n    'Mã Bravo 7',\n    'Mã Bravo 10',\n    'Tên Khoản Mục / Diễn Giải',\n    'Trọng yếu (⭐)'\n  ];\n\n  var rows = [headerRow];\n  categories.forEach(function(cat, index) {\n    var b7Text = cat.b7_display || (cat.b7_codes ? cat.b7_codes.join(', ') : '');\n    var b10Text = cat.b10_display || (cat.b10_codes ? cat.b10_codes.join(', ') : '');\n    var tt = cat.tt || (index + 1);\n    var grp = cat.group || 'Chi phí hoạt động chung';\n    var name = cat.name || '';\n    var mat = cat.is_material ? '⭐' : '';\n    rows.push([tt, grp, b7Text, b10Text, name, mat]);\n  });\n\n  sheet.getRange(1, 1, rows.length, 6).setValues(rows);\n\n  var headerRange = sheet.getRange(1, 1, 1, 6);\n  headerRange.setBackground('#00529C')\n             .setFontColor('#FFFFFF')\n             .setFontWeight('bold')\n             .setHorizontalAlignment('center')\n             .setVerticalAlignment('middle');\n  sheet.setRowHeight(1, 35);\n\n  if (rows.length > 1) {\n    sheet.getRange(2, 1, rows.length - 1, 1).setHorizontalAlignment('center');\n    sheet.getRange(2, 3, rows.length - 1, 2).setHorizontalAlignment('center');\n    sheet.getRange(2, 6, rows.length - 1, 1).setHorizontalAlignment('center');\n  }\n\n  sheet.setFrozenRows(1);\n  sheet.autoResizeColumns(1, 6);\n\n  return jsonResponse({\n    status: 'success',\n    message: 'Đã đồng bộ thành công ' + categories.length + ' khoản mục lên Google Sheet DM_CPHC!',\n    count: categories.length,\n    updatedAt: new Date().toISOString()\n  });\n}\n\n/**\n * =========================================================================================\n * XỬ LÝ QUẢN TRỊ ↔ PHÁP NHÂN (DM_QTPN)\n * =========================================================================================\n */\nfunction handleGetDmQtpn() {\n  var ss = SpreadsheetApp.getActiveSpreadsheet();\n  var mappings = readDmQtpn(ss);\n\n  return jsonResponse({\n    status: 'success',\n    sheet: SHEET_DM_QTPN,\n    count: mappings.length,\n    updatedAt: new Date().toISOString(),\n    qtpnMappings: mappings\n  });\n}\n\nfunction readDmQtpn(ss) {\n  var sheet = ss.getSheetByName(SHEET_DM_QTPN);\n  if (!sheet || sheet.getLastRow() <= 1) return [];\n\n  var data = sheet.getDataRange().getValues();\n  if (data.length <= 1) return [];\n\n  var headers = data[0].map(function(h) { return String(h || '').trim().toLowerCase(); });\n  var colMap = { tt: 0, khoi: -1, maQt: -1, tenQt: -1, maPn: -1, tenPn: -1 };\n\n  for (var c = 0; c < headers.length; c++) {\n    var h = headers[c];\n    if (h.indexOf('khối') !== -1 || h.indexOf('khoi') !== -1 || h.indexOf('đơn vị') !== -1 && h.indexOf('quản trị') === -1) colMap.khoi = c;\n    else if (h.indexOf('mã quản trị') !== -1 || h.indexOf('ma quan tri') !== -1 || h.indexOf('mã qt') !== -1) colMap.maQt = c;\n    else if (h.indexOf('tên quản trị') !== -1 || h.indexOf('ten quan tri') !== -1 || h.indexOf('đơn vị quản trị') !== -1 || h.indexOf('tên qt') !== -1) colMap.tenQt = c;\n    else if (h.indexOf('mã pháp nhân') !== -1 || h.indexOf('ma phap nhan') !== -1 || h.indexOf('mã đvcs') !== -1 || h.indexOf('mã pn') !== -1) colMap.maPn = c;\n    else if (h.indexOf('tên pháp nhân') !== -1 || h.indexOf('ten phap nhan') !== -1 || h.indexOf('tên đvcs') !== -1 || h.indexOf('tên pn') !== -1 || h.indexOf('showroom') !== -1) colMap.tenPn = c;\n  }\n\n  // Fallback nếu không khớp từ khóa\n  var is6Cols = data[0].length >= 6;\n  if (colMap.khoi === -1) colMap.khoi = is6Cols ? 1 : -1;\n  if (colMap.maQt === -1) colMap.maQt = is6Cols ? 2 : 1;\n  if (colMap.tenQt === -1) colMap.tenQt = is6Cols ? 3 : 2;\n  if (colMap.maPn === -1) colMap.maPn = is6Cols ? 4 : 3;\n  if (colMap.tenPn === -1) colMap.tenPn = is6Cols ? 5 : 4;\n\n  var mappings = [];\n  for (var r = 1; r < data.length; r++) {\n    var row = data[r];\n    if (!row || row.every(function(cell) { return cell === '' || cell === null; })) continue;\n\n    var khoi = colMap.khoi !== -1 ? String(row[colMap.khoi] || '').trim() : 'VPĐH';\n    var maQt = String(row[colMap.maQt] || '').trim();\n    var tenQt = String(row[colMap.tenQt] || '').trim();\n    var maPn = String(row[colMap.maPn] || '').trim();\n    var tenPn = String(row[colMap.tenPn] || '').trim();\n\n    if (!maQt && !tenQt && !maPn && !tenPn) continue;\n\n    mappings.push({\n      stt: parseInt(row[colMap.tt], 10) || (mappings.length + 1),\n      khoi: khoi || 'VPĐH',\n      maQt: maQt,\n      tenQt: tenQt,\n      maPn: maPn,\n      tenPn: tenPn\n    });\n  }\n\n  return mappings;\n}\n\nfunction handleSaveDmQtpn(payload) {\n  var mappings = payload.qtpnMappings || payload.mappings;\n  if (!mappings || !Array.isArray(mappings)) {\n    return jsonResponse({ status: 'error', message: 'Mảng qtpnMappings không đúng định dạng.' });\n  }\n\n  var ss = SpreadsheetApp.getActiveSpreadsheet();\n  var sheet = ss.getSheetByName(SHEET_DM_QTPN);\n  if (!sheet) {\n    sheet = ss.insertSheet(SHEET_DM_QTPN);\n  }\n\n  sheet.clear();\n\n  var headerRow = [\n    'TT',\n    'Khối Đơn Vị',\n    'Mã Quản trị',\n    'Tên Quản trị',\n    'Mã pháp nhân',\n    'Tên pháp nhân'\n  ];\n\n  var rows = [headerRow];\n  mappings.forEach(function(item, index) {\n    var tt = item.stt || (index + 1);\n    var khoi = item.khoi || 'VPĐH';\n    var maQt = item.maQt || item.maQuanti || '';\n    var tenQt = item.tenQt || item.tenQuanti || '';\n    var maPn = item.maPn || item.maPhapNhan || '';\n    var tenPn = item.tenPn || item.tenPhapNhan || '';\n    rows.push([tt, khoi, maQt, tenQt, maPn, tenPn]);\n  });\n\n  sheet.getRange(1, 1, rows.length, 6).setValues(rows);\n\n  var headerRange = sheet.getRange(1, 1, 1, 6);\n  headerRange.setBackground('#00529C')\n             .setFontColor('#FFFFFF')\n             .setFontWeight('bold')\n             .setHorizontalAlignment('center')\n             .setVerticalAlignment('middle');\n  sheet.setRowHeight(1, 35);\n\n  if (rows.length > 1) {\n    sheet.getRange(2, 1, rows.length - 1, 1).setHorizontalAlignment('center');\n    sheet.getRange(2, 2, rows.length - 1, 1).setHorizontalAlignment('center');\n    sheet.getRange(2, 3, rows.length - 1, 1).setHorizontalAlignment('center');\n    sheet.getRange(2, 5, rows.length - 1, 1).setHorizontalAlignment('center');\n  }\n\n  sheet.setFrozenRows(1);\n  sheet.autoResizeColumns(1, 6);\n\n  return jsonResponse({\n    status: 'success',\n    message: 'Đã đồng bộ thành công ' + mappings.length + ' dòng ánh xạ lên Google Sheet DM_QTPN!',\n    count: mappings.length,\n    updatedAt: new Date().toISOString()\n  });\n}\n\n/**\n * =========================================================================================\n * XỬ LÝ ĐỊNH BIÊN & NHÂN SỰ CB-NV (DM_CBNV)\n * =========================================================================================\n */\nfunction readDmCbnv(ss) {\n  var sheet = ss.getSheetByName(SHEET_DM_CBNV);\n  if (!sheet || sheet.getLastRow() <= 1) return [];\n\n  var data = sheet.getDataRange().getValues();\n  if (data.length <= 1) return [];\n\n  var headers = data[0].map(function(h) { return String(h || '').trim().toLowerCase(); });\n  var colMap = { stt: 0, khoi: -1, maQt: -1, tenQt: -1, maPn: -1, tenPn: -1, nam: -1, thang: -1, dinhBien: -1, thucTe: -1, ghiChu: -1 };\n\n  for (var c = 0; c < headers.length; c++) {\n    var h = headers[c];\n    if (h.indexOf('khối') !== -1 || h.indexOf('khoi') !== -1) colMap.khoi = c;\n    else if (h.indexOf('mã quản trị') !== -1 || h.indexOf('ma qt') !== -1) colMap.maQt = c;\n    else if (h.indexOf('tên quản trị') !== -1 || h.indexOf('ten qt') !== -1) colMap.tenQt = c;\n    else if (h.indexOf('mã đvcs') !== -1 || h.indexOf('mã pn') !== -1 || h.indexOf('mã pháp nhân') !== -1) colMap.maPn = c;\n    else if (h.indexOf('tên pháp nhân') !== -1 || h.indexOf('tên showroom') !== -1 || h.indexOf('tên đvcs') !== -1 || h.indexOf('tên pn') !== -1) colMap.tenPn = c;\n    else if (h.indexOf('năm') !== -1 || h.indexOf('nam') !== -1 || h.indexOf('year') !== -1) colMap.nam = c;\n    else if (h.indexOf('tháng') !== -1 || h.indexOf('thang') !== -1 || h.indexOf('kỳ') !== -1 || h.indexOf('ky') !== -1 || h.indexOf('month') !== -1) colMap.thang = c;\n    else if (h.indexOf('định biên') !== -1 || h.indexOf('dinh bien') !== -1) colMap.dinhBien = c;\n    else if (h.indexOf('thực tế') !== -1 || h.indexOf('thuc te') !== -1) colMap.thucTe = c;\n    else if (h.indexOf('ghi chú') !== -1 || h.indexOf('ghi chu') !== -1) colMap.ghiChu = c;\n  }\n\n  // Fallback định vị cột Tháng nếu sheet có 11 cột mà tên tiêu đề không khớp chính xác\n  if (colMap.thang === -1 && headers.length >= 11) {\n    colMap.thang = 7; // Cột H (index 7)\n  }\n\n  var list = [];\n  for (var r = 1; r < data.length; r++) {\n    var row = data[r];\n    if (!row || row.every(function(cell) { return cell === '' || cell === null; })) continue;\n\n    var maPn = colMap.maPn !== -1 ? String(row[colMap.maPn] || '').trim() : '';\n    var tenPn = colMap.tenPn !== -1 ? String(row[colMap.tenPn] || '').trim() : '';\n    if (!maPn && !tenPn) continue;\n\n    var rawThang = colMap.thang !== -1 ? row[colMap.thang] : '';\n    var thangVal = parseInt(String(rawThang).replace(/[^0-9]/g, ''), 10) || 1;\n\n    list.push({\n      stt: parseInt(row[colMap.stt], 10) || (list.length + 1),\n      khoi: colMap.khoi !== -1 ? String(row[colMap.khoi] || '').trim() : 'VPĐH',\n      maQt: colMap.maQt !== -1 ? String(row[colMap.maQt] || '').trim() : '',\n      tenQt: colMap.tenQt !== -1 ? String(row[colMap.tenQt] || '').trim() : '',\n      maPn: maPn,\n      tenPn: tenPn,\n      nam: colMap.nam !== -1 ? (parseInt(row[colMap.nam], 10) || 2026) : 2026,\n      thang: thangVal,\n      dinhBien: colMap.dinhBien !== -1 ? (Number(row[colMap.dinhBien]) || 0) : 0,\n      thucTe: colMap.thucTe !== -1 ? (Number(row[colMap.thucTe]) || 0) : 0,\n      ghiChu: colMap.ghiChu !== -1 ? String(row[colMap.ghiChu] || '').trim() : ''\n    });\n  }\n  return list;\n}\n\nfunction handleGetDmCbnv() {\n  var ss = SpreadsheetApp.getActiveSpreadsheet();\n  var cbnvList = readDmCbnv(ss);\n  return jsonResponse({\n    status: 'success',\n    sheet: SHEET_DM_CBNV,\n    count: cbnvList.length,\n    updatedAt: new Date().toISOString(),\n    cbnvData: cbnvList\n  });\n}\n\nfunction handleSaveDmCbnv(payload) {\n  var list = payload.cbnvData || payload.data || payload.rows;\n  if (!list || !Array.isArray(list)) {\n    return jsonResponse({ status: 'error', message: 'Mảng cbnvData không đúng định dạng.' });\n  }\n\n  var mode = payload.mode || 'upsert'; // 'upsert' (mặc định) | 'overwrite'\n  var ss = SpreadsheetApp.getActiveSpreadsheet();\n  var sheet = ss.getSheetByName(SHEET_DM_CBNV);\n  if (!sheet) {\n    sheet = ss.insertSheet(SHEET_DM_CBNV);\n  }\n\n  var headerRow = [\n    'STT',\n    'Khối Đơn Vị',\n    'Mã Quản trị',\n    'Tên Quản trị',\n    'Mã ĐVCS',\n    'Tên Pháp Nhân / Showroom',\n    'Năm',\n    'Tháng',\n    'Định Biên (Người)',\n    'Thực Tế (Người)',\n    'Ghi Chú'\n  ];\n\n  var existingRows = [];\n  if (sheet.getLastRow() > 1 && mode !== 'overwrite') {\n    existingRows = readDmCbnv(ss);\n  }\n\n  var finalRecords = [];\n  if (mode === 'overwrite' || existingRows.length === 0) {\n    finalRecords = list.slice();\n  } else {\n    // Mode upsert: Map theo Khóa duy nhất (Mã ĐVCS + Năm + Tháng)\n    var recordMap = {};\n    existingRows.forEach(function(rec) {\n      var key = (String(rec.maPn || rec.code || '').trim() + '_' + (rec.nam || 2026) + '_' + (rec.thang || 1)).toUpperCase();\n      recordMap[key] = rec;\n    });\n\n    list.forEach(function(item) {\n      var key = (String(item.maPn || item.code || '').trim() + '_' + (item.nam || item.year || 2026) + '_' + (item.thang || item.month || 1)).toUpperCase();\n      recordMap[key] = item; // Ghi đè hoặc thêm mới\n    });\n\n    finalRecords = Object.keys(recordMap).map(function(k) { return recordMap[k]; });\n  }\n\n  // Sắp xếp dữ liệu: Theo Năm tăng dần -> Tháng tăng dần -> Mã ĐVCS\n  finalRecords.sort(function(a, b) {\n    var ya = parseInt(a.nam || a.year || 2026, 10);\n    var yb = parseInt(b.nam || b.year || 2026, 10);\n    if (ya !== yb) return ya - yb;\n\n    var ma = parseInt(a.thang || a.month || 1, 10);\n    var mb = parseInt(b.thang || b.month || 1, 10);\n    if (ma !== mb) return ma - mb;\n\n    var ca = String(a.maPn || a.code || '');\n    var cb = String(b.maPn || b.code || '');\n    return ca.localeCompare(cb);\n  });\n\n  var rows = [headerRow];\n  finalRecords.forEach(function(item, idx) {\n    rows.push([\n      idx + 1,\n      item.khoi || 'VPĐH',\n      item.maQt || '',\n      item.tenQt || '',\n      item.maPn || item.code || '',\n      item.tenPn || item.name || '',\n      item.nam || item.year || 2026,\n      item.thang || item.month || 1,\n      Number(item.dinhBien) || 0,\n      Number(item.thucTe) || 0,\n      item.ghiChu || ''\n    ]);\n  });\n\n  sheet.clear();\n  sheet.getRange(1, 1, rows.length, 11).setValues(rows);\n\n  var headerRange = sheet.getRange(1, 1, 1, 11);\n  headerRange.setBackground('#00529C')\n             .setFontColor('#FFFFFF')\n             .setFontWeight('bold')\n             .setHorizontalAlignment('center')\n             .setVerticalAlignment('middle');\n  sheet.setRowHeight(1, 35);\n\n  if (rows.length > 1) {\n    sheet.getRange(2, 1, rows.length - 1, 1).setHorizontalAlignment('center'); // STT\n    sheet.getRange(2, 2, rows.length - 1, 1).setHorizontalAlignment('center'); // Khối\n    sheet.getRange(2, 3, rows.length - 1, 1).setHorizontalAlignment('center'); // Mã QT\n    sheet.getRange(2, 5, rows.length - 1, 1).setHorizontalAlignment('center'); // Mã ĐVCS\n    sheet.getRange(2, 7, rows.length - 1, 2).setHorizontalAlignment('center'); // Năm, Tháng\n    sheet.getRange(2, 9, rows.length - 1, 2).setNumberFormat('#,##0').setHorizontalAlignment('right'); // Định Biên, Thực Tế\n  }\n\n  sheet.setFrozenRows(1);\n  sheet.autoResizeColumns(1, 11);\n\n  return jsonResponse({\n    status: 'success',\n    message: 'Đã đồng bộ thành công ' + finalRecords.length + ' dòng nhân sự (theo Tháng) lên Google Sheet DM_CBNV!',\n    count: finalRecords.length,\n    updatedAt: new Date().toISOString()\n  });\n}\n\n/**\n * =========================================================================================\n * XỬ LÝ CHI PHÍ ĐÃ LÀM SẠCH (CP_AUTO / CP_PP / CP_CTTT)\n * =========================================================================================\n */\nfunction handleGetCostData(sheetName) {\n  var ss = SpreadsheetApp.getActiveSpreadsheet();\n  var sheet = ss.getSheetByName(sheetName);\n  if (!sheet) {\n    return jsonResponse({\n      status: 'error',\n      message: 'Sheet \"' + sheetName + '\" chưa tồn tại trên file này.'\n    });\n  }\n\n  var rows = readSheetCostRows(ss, sheetName);\n\n  return jsonResponse({\n    status: 'success',\n    sheet: sheetName,\n    count: rows.length,\n    rows: rows\n  });\n}\n\nfunction handleSaveCostData(payload) {\n  var targetSheet = payload.targetSheet || 'CP_AUTO';\n  if (COST_SHEETS.indexOf(targetSheet) === -1) {\n    targetSheet = 'CP_AUTO';\n  }\n\n  var newRows = payload.rows;\n  if (!newRows || !Array.isArray(newRows)) {\n    return jsonResponse({ status: 'error', message: 'Mảng rows không đúng định dạng.' });\n  }\n\n  var entityCode = payload.entityCode ? String(payload.entityCode).trim() : '';\n  var year = payload.year ? parseInt(payload.year, 10) : null;\n  var mode = payload.mode || 'replace_year_entity'; // 'replace_year_entity' | 'overwrite' | 'append'\n\n  var ss = SpreadsheetApp.getActiveSpreadsheet();\n  var sheet = ss.getSheetByName(targetSheet);\n  if (!sheet) {\n    sheet = ss.insertSheet(targetSheet);\n  }\n\n  var existingValues = [];\n  if (sheet.getLastRow() > 1 && mode === 'replace_year_entity') {\n    existingValues = sheet.getRange(2, 1, sheet.getLastRow() - 1, COST_COLUMNS.length).getValues();\n  }\n\n  var preservedRows = [];\n  if (mode === 'replace_year_entity' && existingValues.length > 0) {\n    preservedRows = existingValues.filter(function(row) {\n      var rowEntity = String(row[1] || '').trim(); // Cột 2: Mã ĐVCS\n      var rowYear = parseInt(row[11], 10);        // Cột 12: Năm\n      if (entityCode && year) {\n        return !(rowEntity === entityCode && rowYear === year);\n      } else if (year) {\n        return rowYear !== year;\n      } else if (entityCode) {\n        return rowEntity !== entityCode;\n      }\n      return false;\n    });\n  }\n\n  // Chuẩn hóa dữ liệu mới thành mảng 2 chiều theo đúng 26 cột COST_COLUMNS\n  var formattedNewRows = newRows.map(function(item) {\n    if (Array.isArray(item)) return item;\n\n    var months = item.months || [0,0,0,0,0,0,0,0,0,0,0,0];\n    var totalVal = typeof item.total === 'number' ? item.total : months.reduce(function(a,b){ return a + (b||0); }, 0);\n\n    return [\n      item.stt || '',\n      item.entityCode || entityCode || 'C1101',\n      item.entityName || 'THACO AUTO',\n      item.km || item.b7 || '',\n      item.tenKm || item.name || '',\n      item.nhom || 'Chi phí hoạt động chung',\n      item.b10 || '',\n      item.isMaterial ? '⭐' : '',\n      item.bp || '',\n      item.tenBp || '',\n      item.khoiPb || '',\n      item.year || year || 2026,\n      item.ky || (item.year === 2025 ? 'Cả năm' : 'T1 - T7'),\n      months[0] || 0,\n      months[1] || 0,\n      months[2] || 0,\n      months[3] || 0,\n      months[4] || 0,\n      months[5] || 0,\n      months[6] || 0,\n      months[7] || 0,\n      months[8] || 0,\n      months[9] || 0,\n      months[10] || 0,\n      months[11] || 0,\n      totalVal\n    ];\n  });\n\n  var finalDataRows = preservedRows.concat(formattedNewRows);\n\n  // Đánh lại số thứ tự STT\n  finalDataRows.forEach(function(r, idx) {\n    r[0] = idx + 1;\n  });\n\n  // Ghi toàn bộ dữ liệu (Header + Rows)\n  sheet.clear();\n  var writeArray = [COST_COLUMNS].concat(finalDataRows);\n\n  var numRows = writeArray.length;\n  var numCols = COST_COLUMNS.length;\n\n  sheet.getRange(1, 1, numRows, numCols).setValues(writeArray);\n\n  // Định dạng tiêu đề THACO Royal Blue #00529C\n  var headerRange = sheet.getRange(1, 1, 1, numCols);\n  headerRange.setBackground('#00529C')\n             .setFontColor('#FFFFFF')\n             .setFontWeight('bold')\n             .setHorizontalAlignment('center')\n             .setVerticalAlignment('middle');\n  sheet.setRowHeight(1, 35);\n\n  if (numRows > 1) {\n    // Căn giữa các cột mã số, năm, kỳ\n    sheet.getRange(2, 1, numRows - 1, 1).setHorizontalAlignment('center'); // STT\n    sheet.getRange(2, 2, numRows - 1, 1).setHorizontalAlignment('center'); // Mã ĐVCS\n    sheet.getRange(2, 4, numRows - 1, 1).setHorizontalAlignment('center'); // Mã B7\n    sheet.getRange(2, 7, numRows - 1, 2).setHorizontalAlignment('center'); // Mã B10, Trọng yếu\n    sheet.getRange(2, 9, numRows - 1, 1).setHorizontalAlignment('center'); // Mã BP\n    sheet.getRange(2, 11, numRows - 1, 3).setHorizontalAlignment('center'); // Khối PB, Năm, Kỳ\n\n    // Định dạng số tiền (cột T01 đến Tổng Cộng) dạng phân cách hàng ngàn #,##0\n    var moneyRange = sheet.getRange(2, 14, numRows - 1, 13);\n    moneyRange.setNumberFormat('#,##0').setHorizontalAlignment('right');\n  }\n\n  sheet.setFrozenRows(1);\n  sheet.setFrozenColumns(5); // Cố định 5 cột đầu (STT, Mã ĐVCS, Đơn vị, Mã B7, Tên Khoản Mục)\n  sheet.autoResizeColumns(1, numCols);\n\n  var totalMoney = formattedNewRows.reduce(function(acc, r) { return acc + (Number(r[25]) || 0); }, 0);\n\n  return jsonResponse({\n    status: 'success',\n    sheet: targetSheet,\n    mode: mode,\n    newRowsCount: formattedNewRows.length,\n    totalRowsInSheet: finalDataRows.length,\n    totalMoneyVND: totalMoney,\n    message: 'Đã lưu thành công ' + formattedNewRows.length + ' dòng dữ liệu vào sheet ' + targetSheet + ' (Tổng tiền: ' + totalMoney.toLocaleString('vi-VN') + ' đ)!'\n  });\n}\n\n/**\n * =========================================================================================\n * CÁC HÀM TIỆN ÍCH MENU CHO NGƯỜI DÙNG TRÊN GOOGLE SHEET\n * =========================================================================================\n */\nfunction checkDmStructure() {\n  var ss = SpreadsheetApp.getActiveSpreadsheet();\n  var sheet = ss.getSheetByName(SHEET_DM_CPHC);\n  if (!sheet) {\n    SpreadsheetApp.getUi().alert('Chưa có sheet \"' + SHEET_DM_CPHC + '\". Hãy bấm đồng bộ từ Web App để tự động tạo.');\n    return;\n  }\n  var count = Math.max(0, sheet.getLastRow() - 1);\n  SpreadsheetApp.getUi().alert('Sheet DM_CPHC đang có ' + count + ' khoản mục chi phí.');\n}\n\nfunction formatDmSheet() {\n  var ss = SpreadsheetApp.getActiveSpreadsheet();\n  var sheet = ss.getSheetByName(SHEET_DM_CPHC);\n  if (!sheet || sheet.getLastRow() < 1) return;\n  sheet.autoResizeColumns(1, 6);\n  SpreadsheetApp.getActiveSpreadsheet().toast('Đã định dạng lại sheet DM_CPHC!', 'THACO AUTO', 3);\n}\n\nfunction checkDmQtpnStructure() {\n  var ss = SpreadsheetApp.getActiveSpreadsheet();\n  var sheet = ss.getSheetByName(SHEET_DM_QTPN);\n  if (!sheet) {\n    SpreadsheetApp.getUi().alert('Chưa có sheet \"' + SHEET_DM_QTPN + '\". Hãy bấm đồng bộ từ Web App để tự động tạo.');\n    return;\n  }\n  var count = Math.max(0, sheet.getLastRow() - 1);\n  SpreadsheetApp.getUi().alert('Sheet DM_QTPN đang có ' + count + ' dòng ánh xạ.');\n}\n\nfunction formatDmQtpnSheet() {\n  var ss = SpreadsheetApp.getActiveSpreadsheet();\n  var sheet = ss.getSheetByName(SHEET_DM_QTPN);\n  if (!sheet || sheet.getLastRow() < 1) return;\n  sheet.autoResizeColumns(1, 6);\n  SpreadsheetApp.getActiveSpreadsheet().toast('Đã định dạng lại sheet DM_QTPN!', 'THACO AUTO', 3);\n}\n\nfunction checkDmCbnvStructure() {\n  var ss = SpreadsheetApp.getActiveSpreadsheet();\n  var sheet = ss.getSheetByName(SHEET_DM_CBNV);\n  if (!sheet) {\n    SpreadsheetApp.getUi().alert('Chưa có sheet \"' + SHEET_DM_CBNV + '\". Hãy bấm đồng bộ từ Web App để tự động tạo.');\n    return;\n  }\n  var count = Math.max(0, sheet.getLastRow() - 1);\n  SpreadsheetApp.getUi().alert('Sheet DM_CBNV đang có ' + count + ' dòng nhân sự.');\n}\n\nfunction formatDmCbnvSheet() {\n  var ss = SpreadsheetApp.getActiveSpreadsheet();\n  var sheet = ss.getSheetByName(SHEET_DM_CBNV);\n  if (!sheet || sheet.getLastRow() < 1) return;\n  sheet.autoResizeColumns(1, 11);\n  SpreadsheetApp.getActiveSpreadsheet().toast('Đã định dạng lại sheet DM_CBNV!', 'THACO AUTO', 3);\n}\n\nfunction initCostSheets() {\n  var ss = SpreadsheetApp.getActiveSpreadsheet();\n  COST_SHEETS.forEach(function(sName) {\n    var sh = ss.getSheetByName(sName);\n    if (!sh) {\n      sh = ss.insertSheet(sName);\n      sh.getRange(1, 1, 1, COST_COLUMNS.length).setValues([COST_COLUMNS]);\n      sh.getRange(1, 1, 1, COST_COLUMNS.length)\n        .setBackground('#00529C')\n        .setFontColor('#FFFFFF')\n        .setFontWeight('bold')\n        .setHorizontalAlignment('center');\n      sh.setRowHeight(1, 35);\n      sh.setFrozenRows(1);\n      sh.setFrozenColumns(5);\n      sh.autoResizeColumns(1, COST_COLUMNS.length);\n    }\n  });\n  SpreadsheetApp.getUi().alert('Đã khởi tạo xong các sheet: ' + COST_SHEETS.join(', '));\n}\n\nfunction formatAllCostSheets() {\n  var ss = SpreadsheetApp.getActiveSpreadsheet();\n  COST_SHEETS.forEach(function(sName) {\n    var sh = ss.getSheetByName(sName);\n    if (sh && sh.getLastRow() > 0) {\n      sh.autoResizeColumns(1, COST_COLUMNS.length);\n      sh.setFrozenRows(1);\n      sh.setFrozenColumns(5);\n    }\n  });\n  SpreadsheetApp.getActiveSpreadsheet().toast('Đã chuẩn hóa định dạng các sheet chi phí!', 'THACO AUTO', 3);\n}\n\nfunction jsonResponse(obj) {\n  return ContentService\n    .createTextOutput(JSON.stringify(obj))\n    .setMimeType(ContentService.MimeType.JSON);\n}\n";
 
     function getGoogleSheetSyncConfig() {
         try {
@@ -1036,9 +1062,134 @@
     function saveGoogleSheetSyncConfig(cfg) {
         try {
             localStorage.setItem(GSHEET_CONFIG_KEY, JSON.stringify(cfg));
+            window.THACO_LAST_SYNC_ERROR = null;
             updateGoogleSheetSyncUI();
         } catch (e) {
             console.error('Lỗi lưu cấu hình Google Sheet:', e);
+        }
+    }
+
+    let isConfiguredFromUrl = false;
+
+    function checkUrlConnectionParams() {
+        try {
+            if (typeof window === 'undefined' || !window.location) return false;
+
+            let urlParams = new URLSearchParams(window.location.search);
+            let apiUrl = urlParams.get('apiUrl') || urlParams.get('api_url');
+            let apiKey = urlParams.get('apiKey') || urlParams.get('api_key');
+
+            // Hỗ trợ trường hợp tham số được truyền trong hash (?apiUrl=... trong hash)
+            if (!apiUrl && window.location.hash && window.location.hash.includes('?')) {
+                const hashQuery = window.location.hash.substring(window.location.hash.indexOf('?') + 1);
+                const hashParams = new URLSearchParams(hashQuery);
+                apiUrl = hashParams.get('apiUrl') || hashParams.get('api_url');
+                if (!apiKey) apiKey = hashParams.get('apiKey') || hashParams.get('api_key');
+            }
+
+            const currentCfg = getGoogleSheetSyncConfig();
+            const hasApiUrl = Boolean(apiUrl && apiUrl.trim());
+            const hasApiKey = Boolean(apiKey !== null && apiKey !== undefined && apiKey.trim() !== '');
+
+            // Nếu URL có apiUrl HOẶC có apiKey (khi đã có webAppUrl sẵn trong LocalStorage hoặc truyền cùng)
+            if (hasApiUrl || (hasApiKey && currentCfg && currentCfg.webAppUrl && currentCfg.webAppUrl.trim())) {
+                let targetUrl = hasApiUrl ? apiUrl.trim() : currentCfg.webAppUrl.trim();
+
+                // 1. Quy tắc apiKey:
+                // - Nếu URL có apiKey hợp lệ (không rỗng): dùng apiKey mới từ URL.
+                // - Nếu URL chỉ có apiUrl mà không có apiKey (hoặc rỗng): GIỮ NGUYÊN apiKey đã lưu trong LocalStorage (nếu có).
+                // - Nếu cả hai đều chưa có: mới sử dụng token mặc định.
+                let finalApiKey = (currentCfg && currentCfg.apiKey && currentCfg.apiKey.trim()) ? currentCfg.apiKey.trim() : 'THACO_CPHC_2026_SECURE_TOKEN';
+                if (hasApiKey) {
+                    finalApiKey = apiKey.trim();
+                }
+
+                const newCfg = {
+                    webAppUrl: targetUrl,
+                    apiKey: finalApiKey,
+                    autoSync: true,
+                    lastSynced: currentCfg ? (currentCfg.lastSynced || null) : null
+                };
+
+                saveGoogleSheetSyncConfig(newCfg);
+                isConfiguredFromUrl = true;
+
+                // 2. Xóa apiUrl và apiKey khỏi URL trên thanh địa chỉ bằng history.replaceState để bảo mật (tránh lộ khi chia sẻ link/chụp màn hình)
+                if (window.history && window.history.replaceState) {
+                    try {
+                        const url = new URL(window.location.href);
+                        url.searchParams.delete('apiUrl');
+                        url.searchParams.delete('api_url');
+                        url.searchParams.delete('apiKey');
+                        url.searchParams.delete('api_key');
+                        const cleanQuery = url.searchParams.toString();
+                        const cleanUrl = url.pathname + (cleanQuery ? '?' + cleanQuery : '') + url.hash;
+                        window.history.replaceState({}, document.title, cleanUrl);
+                    } catch (historyErr) {
+                        console.warn('Không thể cập nhật URL bằng replaceState:', historyErr);
+                    }
+                }
+
+                return true;
+            }
+        } catch (e) {
+            console.error('Lỗi khi đọc cấu hình kết nối từ URL:', e);
+        }
+        return false;
+    }
+
+    function showSyncErrorBanner(msg) {
+        const banner = document.getElementById('gsheet-sync-error-banner');
+        if (banner) {
+            const textEl = document.getElementById('gsheet-sync-error-text');
+            if (textEl) textEl.textContent = msg || 'Không thể kết nối với Google Sheet. Đang hiển thị dữ liệu dự phòng.';
+            banner.classList.remove('hidden');
+            banner.style.display = 'flex';
+        }
+    }
+
+    function hideSyncErrorBanner() {
+        const banner = document.getElementById('gsheet-sync-error-banner');
+        if (banner) {
+            banner.classList.add('hidden');
+            banner.style.display = 'none';
+        }
+    }
+
+    function showLoadingOverlay(msg) {
+        const overlay = document.getElementById('gsheet-loading-overlay');
+        if (overlay) {
+            const desc = document.getElementById('gsheet-loading-desc');
+            if (desc) desc.textContent = msg || 'Đang kết nối và tải dữ liệu thực tế từ Google Sheet...';
+            overlay.classList.remove('hidden');
+        }
+    }
+
+    function hideLoadingOverlay() {
+        const overlay = document.getElementById('gsheet-loading-overlay');
+        if (overlay) overlay.classList.add('hidden');
+    }
+
+    function updateSyncStatusError(errMsg) {
+        window.THACO_LAST_SYNC_ERROR = errMsg;
+        const statusBadge = document.getElementById('gsheet-sync-status-badge');
+        const tabStatusBadge = document.getElementById('tab-sync-status-badge');
+        const statusMsg = document.getElementById('gsheet-sync-status-msg');
+        const tabLastTime = document.getElementById('tab-sync-last-time');
+
+        if (statusBadge) {
+            statusBadge.className = 'text-[10px] font-extrabold px-2.5 py-0.5 rounded-full bg-rose-100 text-rose-800 border border-rose-300 flex items-center gap-1 shadow-sm';
+            statusBadge.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-rose-600 animate-ping"></span> 🔴 Lỗi kết nối Live Sync';
+        }
+        if (tabStatusBadge) {
+            tabStatusBadge.className = 'px-2.5 py-1 rounded-full text-xs font-black bg-rose-100 text-rose-800 border border-rose-300 inline-flex items-center gap-1.5 shadow-sm';
+            tabStatusBadge.innerHTML = '<span class="w-2 h-2 rounded-full bg-rose-600 animate-ping"></span> Lỗi kết nối Live Sync';
+        }
+        if (statusMsg) {
+            statusMsg.textContent = `❌ Lỗi kết nối: ${errMsg}. Đang hiển thị dữ liệu dự phòng.`;
+        }
+        if (tabLastTime) {
+            tabLastTime.textContent = `Lần thử gần nhất: Thất bại (${errMsg})`;
         }
     }
 
@@ -1059,6 +1210,11 @@
         if (inputTab) inputTab.value = config.webAppUrl || '';
         if (inputKeyTab) inputKeyTab.value = config.apiKey || '';
         if (chkAutoSync) chkAutoSync.checked = config.autoSync !== false;
+
+        if (window.THACO_LAST_SYNC_ERROR) {
+            updateSyncStatusError(window.THACO_LAST_SYNC_ERROR);
+            return;
+        }
 
         const timeStr = config.lastSynced ? (new Date(config.lastSynced).toLocaleTimeString('vi-VN') + ' ' + new Date(config.lastSynced).toLocaleDateString('vi-VN')) : null;
 
@@ -1290,15 +1446,41 @@
             console.log('Đang kết nối Google Sheet Quan_Ly_Chi_Phi...');
             const keyParam = config.apiKey ? `&api_key=${encodeURIComponent(config.apiKey.trim())}` : '';
             const fetchUrl = config.webAppUrl + (config.webAppUrl.includes('?') ? '&' : '?') + 't=' + Date.now() + keyParam;
-            const res = await fetch(fetchUrl);
-            if (!res.ok && res.status !== 401) throw new Error('HTTP status ' + res.status);
-            const data = await res.json();
 
-            if (data.code === 401 || (data.status === 'error' && data.code === 401)) {
-                throw new Error('Khóa bảo mật API_KEY không hợp lệ hoặc chưa được cung cấp. Vui lòng kiểm tra lại cấu hình kết nối.');
+            const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+            const timeoutId = controller ? setTimeout(() => controller.abort(), 25000) : null;
+
+            let res;
+            try {
+                res = await fetch(fetchUrl, controller ? { signal: controller.signal } : {});
+            } catch (netErr) {
+                if (netErr.name === 'AbortError') {
+                    throw new Error('Quá thời gian chờ phản hồi từ Google Apps Script (Timeout 25s). Vui lòng kiểm tra lại kết nối mạng hoặc URL.');
+                }
+                throw new Error('Lỗi kết nối mạng hoặc CORS: ' + (netErr.message || 'Không thể gửi yêu cầu tới Apps Script'));
+            } finally {
+                if (timeoutId) clearTimeout(timeoutId);
+            }
+
+            // Google Apps Script (ContentService) luôn trả về HTTP status 200 ngay cả khi xảy ra lỗi logic (như 401).
+            // Do đó KHÔNG phụ thuộc vào res.status, mà kiểm tra trực tiếp nội dung JSON trả về.
+            let data;
+            try {
+                data = await res.json();
+            } catch (jsonErr) {
+                throw new Error('Không thể phân tích dữ liệu trả về từ Apps Script (Không phải định dạng JSON hợp lệ)');
+            }
+
+            // Kiểm tra TRỰC TIẾP nội dung JSON: status === 'error' hoặc code === 401
+            if (!data || data.status === 'error' || data.code === 401 || data.code === '401' || data.status !== 'success') {
+                const isKeyError = Boolean(data && (data.code === 401 || data.code === '401' || (data.message && data.message.includes('API_KEY'))));
+                const errMsg = (data && data.message) ? data.message : (isKeyError ? 'Khóa bảo mật API_KEY không hợp lệ hoặc chưa được cung cấp. Vui lòng kiểm tra lại cấu hình kết nối.' : 'Dữ liệu phản hồi từ Google Sheet không hợp lệ.');
+                throw new Error(errMsg);
             }
 
             if (data.status === 'success') {
+                window.THACO_LAST_SYNC_ERROR = null;
+                hideSyncErrorBanner();
                 processGoogleSheetData(data);
 
                 config.lastSynced = new Date().toISOString();
@@ -1320,9 +1502,16 @@
             }
         } catch (err) {
             console.error('Lỗi đồng bộ từ Google Sheet:', err);
-            if (isManual) {
-                alert('Không thể kết nối với Google Sheet: ' + err.message + '\n\nVui lòng kiểm tra lại Web App URL và khóa API_KEY trong mục Cài đặt kết nối.');
+            updateSyncStatusError(err.message);
+
+            // Luôn hiển thị banner cảnh báo đỏ nổi bật khi đồng bộ thất bại (không âm thầm rơi về demo)
+            showSyncErrorBanner(`Không thể kết nối tới Google Sheet: ${err.message}. Đang hiển thị dữ liệu dự phòng.`);
+
+            if (isManual || isConfiguredFromUrl) {
+                alert(`⚠️ KHÔNG THỂ KẾT NỐI VỚI GOOGLE SHEET:\n${err.message}\n\nVui lòng kiểm tra lại Web App URL hoặc khóa bảo mật API_KEY trong mục Cài đặt kết nối. Hệ thống đang hiển thị dữ liệu dự phòng.`);
             }
+
+            renderAll();
         } finally {
             if (btn1) btn1.classList.remove('opacity-50', 'pointer-events-none');
             if (btn2) btn2.classList.remove('opacity-50', 'pointer-events-none');
@@ -1460,7 +1649,7 @@
             if (json.status === 'success') {
                 resultArea.className = 'p-3 rounded-lg border text-xs bg-emerald-50 text-emerald-800 border-emerald-300 font-bold';
                 resultArea.textContent = `✅ Xác thực kết nối và khóa API_KEY thành công! ${json.message || ''}`;
-            } else if (json.code === 401 || res.status === 401) {
+            } else if (json.status === 'error' || json.code === 401 || json.code === '401') {
                 resultArea.className = 'p-3 rounded-lg border text-xs bg-rose-50 text-rose-800 border-rose-300 font-bold';
                 resultArea.textContent = `❌ Từ chối truy cập (401): ${json.message || 'Khóa API_KEY không chính xác. Vui lòng kiểm tra lại trên Google Sheet.'}`;
             } else {
@@ -1546,6 +1735,12 @@
         const btnTabCopyCode = document.getElementById('btn-tab-copy-code');
         if (btnTabCopyCode) btnTabCopyCode.addEventListener('click', copyAppsScriptCode);
 
+        const btnBannerCheckConfig = document.getElementById('btn-banner-check-config');
+        if (btnBannerCheckConfig) btnBannerCheckConfig.addEventListener('click', openGoogleSheetConfigModal);
+
+        const btnBannerCloseError = document.getElementById('btn-banner-close-error');
+        if (btnBannerCloseError) btnBannerCloseError.addEventListener('click', hideSyncErrorBanner);
+
         // Buttons Scope & Role
         const btnScopeCurrent = document.getElementById('btn-scope-current');
         if (btnScopeCurrent) btnScopeCurrent.addEventListener('click', () => setScopeMode('CURRENT_2026'));
@@ -1619,7 +1814,7 @@
         const tabUploadBtn = document.getElementById('tab-upload-btn');
         if (tabUploadBtn) tabUploadBtn.addEventListener('click', () => switchTab('upload'));
 
-        // CBNV Controls (Mục 2.5: Chi phí / CB-NV)
+        // CBNV Controls (Chi phí / CB-NV)
         const btnCbnvModeThucTe = document.getElementById('btn-cbnv-mode-thucte');
         if (btnCbnvModeThucTe) btnCbnvModeThucTe.addEventListener('click', () => setCbnvDisplayMode('THUC_TE'));
 
@@ -1677,6 +1872,16 @@
 
         const btnSyncCbnvGsheet = document.getElementById('btn-sync-cbnv-gsheet');
         if (btnSyncCbnvGsheet) btnSyncCbnvGsheet.addEventListener('click', handleSyncCbnvWithGoogleSheetPrompt);
+
+        const selectCbnvPeriod = document.getElementById('select-cbnv-period');
+        if (selectCbnvPeriod) {
+            selectCbnvPeriod.addEventListener('change', (e) => {
+                if (!state.cbnvConfig) state.cbnvConfig = {};
+                state.cbnvConfig.selectedPeriod = e.target.value;
+                saveCurrentState();
+                renderCbnvTab();
+            });
+        }
 
         // QTPN Controls
         const btnSyncQtpnPull = document.getElementById('btn-sync-qtpn-from-gsheet');
@@ -4447,8 +4652,8 @@
             const resp = await fetch(url);
             const data = await resp.json();
 
-            if (data.code === 401 || (data.status === 'error' && data.code === 401)) {
-                alert('Khóa bảo mật API_KEY không đúng (Lỗi 401). Vui lòng cập nhật lại khóa trong Cài đặt kết nối.');
+            if (data.status === 'error' || data.code === 401 || data.code === '401') {
+                alert(`Khóa bảo mật API_KEY không đúng hoặc xảy ra lỗi: ${data.message || 'Lỗi 401'}. Vui lòng cập nhật lại khóa trong Cài đặt kết nối.`);
                 return;
             }
 
@@ -4546,7 +4751,7 @@
     }
 
     // ==========================================
-    // 👥 ĐỊNH MỨC CHI PHÍ / CB-NV (MỤC 2.5) MODULE
+    // 👥 ĐỊNH MỨC CHI PHÍ / CB-NV MODULE
     // ==========================================
 
     let cbnvBenchmarkChart = null;
@@ -4561,6 +4766,9 @@
         if (!state.cbnvData || typeof state.cbnvData !== 'object') {
             state.cbnvData = {};
         }
+        if (!state.cbnvRecords || !Array.isArray(state.cbnvRecords)) {
+            state.cbnvRecords = [];
+        }
 
         const defaultSeed = {
             'C1101': { dinhBien: 180, thucTe: 172, khoi: 'VPĐH', maQt: 'QT_AUTO', tenQt: 'THACO AUTO', ghiChu: 'Định mức chuẩn VPĐH' },
@@ -4570,9 +4778,11 @@
         };
 
         const activeEntities = (state.entities || []).filter(e => e.active !== false);
-        activeEntities.forEach((ent, idx) => {
-            const code = ent.code;
-            if (!state.cbnvData[code]) {
+
+        // Nếu chưa có bất kỳ bản ghi cbnvRecords nào, khởi tạo dữ liệu mẫu cho Tháng 1..Tháng 7
+        if (state.cbnvRecords.length === 0) {
+            activeEntities.forEach((ent, idx) => {
+                const code = ent.code;
                 const seed = defaultSeed[code] || {
                     dinhBien: 60,
                     thucTe: 56,
@@ -4581,30 +4791,106 @@
                     tenQt: ent.qt || ent.name,
                     ghiChu: ''
                 };
-                state.cbnvData[code] = {
-                    stt: idx + 1,
-                    maPn: code,
-                    tenPn: ent.cleanName || ent.name,
-                    khoi: seed.khoi || ent.khoiName || 'VPĐH',
-                    maQt: seed.maQt || ent.qtCode || ('QT_' + code),
-                    tenQt: seed.tenQt || ent.qt || ent.name,
-                    nam: 2026,
-                    dinhBien: seed.dinhBien,
-                    thucTe: seed.thucTe,
-                    ghiChu: seed.ghiChu || ''
-                };
-            }
+                const baseMonths = [1, 2, 3, 4, 5, 6, 7];
+                baseMonths.forEach(m => {
+                    state.cbnvRecords.push({
+                        stt: state.cbnvRecords.length + 1,
+                        maPn: code,
+                        tenPn: ent.cleanName || ent.name,
+                        khoi: seed.khoi || ent.khoiName || 'VPĐH',
+                        maQt: seed.maQt || ent.qtCode || ('QT_' + code),
+                        tenQt: seed.tenQt || ent.qt || ent.name,
+                        nam: 2026,
+                        thang: m,
+                        dinhBien: seed.dinhBien,
+                        thucTe: seed.thucTe,
+                        ghiChu: seed.ghiChu || ''
+                    });
+                });
+            });
+        }
+
+        // Cập nhật lại view cbnvData cho kỳ đang chọn
+        const curPeriod = (state.cbnvConfig && state.cbnvConfig.selectedPeriod) || 'ALL';
+        activeEntities.forEach((ent, idx) => {
+            const code = ent.code;
+            state.cbnvData[code] = getCbnvEntityData(code, curPeriod, 2026);
         });
     }
 
     /**
-     * Tính tổng chi phí của 1 pháp nhân theo năm (Đơn vị: Triệu VNĐ)
+     * Lấy dữ liệu nhân sự của 1 pháp nhân theo kỳ/tháng cụ thể hoặc bình quân lũy kế
      */
-    function getEntityCostTrD(entCode, yearStr) {
+    function getCbnvEntityData(code, period = 'ALL', year = 2026) {
+        if (!state.cbnvRecords || !Array.isArray(state.cbnvRecords)) {
+            state.cbnvRecords = [];
+        }
+
+        const entRecords = state.cbnvRecords.filter(r => 
+            (r.maPn === code || r.code === code) && 
+            (parseInt(r.nam || r.year || 2026, 10) === parseInt(year, 10))
+        );
+
+        if (period !== 'ALL') {
+            const m = parseInt(period, 10);
+            const match = entRecords.find(r => parseInt(r.thang || r.month || 1, 10) === m);
+            if (match) return { ...match, thang: m };
+
+            // Nếu chưa có đúng tháng đó, lấy tháng gần nhất
+            if (entRecords.length > 0) {
+                const nearest = entRecords[entRecords.length - 1];
+                return { ...nearest, thang: m, isFallback: true };
+            }
+            if (state.cbnvData && state.cbnvData[code]) {
+                return { ...state.cbnvData[code], thang: m };
+            }
+            return { dinhBien: 0, thucTe: 0, thang: m, khoi: 'VPĐH', maPn: code };
+        }
+
+        // Trường hợp period === 'ALL': Lũy kế cả năm (Bình quân nhân sự)
+        if (entRecords.length > 0) {
+            const sumDb = entRecords.reduce((acc, r) => acc + (Number(r.dinhBien) || 0), 0);
+            const sumTt = entRecords.reduce((acc, r) => acc + (Number(r.thucTe) || 0), 0);
+            const count = entRecords.length;
+            const avgDb = Math.round(sumDb / count);
+            const avgTt = Math.round(sumTt / count);
+            const latest = entRecords[entRecords.length - 1];
+            return {
+                ...latest,
+                dinhBien: avgDb,
+                thucTe: avgTt,
+                isAverage: true,
+                recordedMonthsCount: count
+            };
+        }
+
+        if (state.cbnvData && state.cbnvData[code]) {
+            return state.cbnvData[code];
+        }
+        return { dinhBien: 0, thucTe: 0, khoi: 'VPĐH', maPn: code };
+    }
+
+    /**
+     * Tính tổng chi phí của 1 pháp nhân theo năm và theo kỳ/tháng (Đơn vị: Triệu VNĐ)
+     * @param {string} entCode Mã ĐVCS (ví dụ: 'C1101')
+     * @param {string} yearStr Năm (ví dụ: '2026')
+     * @param {number|Array<number>|string|null} monthOrMonths Tháng cụ thể (1..12), mảng các tháng, hoặc 'ALL'
+     */
+    function getEntityCostTrD(entCode, yearStr, monthOrMonths = null) {
         let totalVnd = 0;
+        const specificMonth = (typeof monthOrMonths === 'number') ? monthOrMonths : (monthOrMonths && monthOrMonths !== 'ALL' && !isNaN(parseInt(monthOrMonths, 10)) ? parseInt(monthOrMonths, 10) : null);
+        const monthFilterList = Array.isArray(monthOrMonths) ? monthOrMonths : (specificMonth ? [specificMonth] : null);
+
         if (state.deptData && state.deptData[entCode] && Array.isArray(state.deptData[entCode][yearStr])) {
             state.deptData[entCode][yearStr].forEach(r => {
-                totalVnd += (r.total || (Array.isArray(r.months) ? r.months.reduce((a, b) => a + b, 0) : 0));
+                if (monthFilterList && Array.isArray(r.months)) {
+                    monthFilterList.forEach(m => {
+                        const mIdx = m - 1;
+                        if (mIdx >= 0 && mIdx < 12) totalVnd += (Number(r.months[mIdx]) || 0);
+                    });
+                } else {
+                    totalVnd += (r.total || (Array.isArray(r.months) ? r.months.reduce((a, b) => a + b, 0) : 0));
+                }
             });
         }
         if (totalVnd === 0) {
@@ -4612,8 +4898,22 @@
             if (ds && ds[entCode]) {
                 const target = ds[entCode]['642'] || ds[entCode];
                 Object.values(target).forEach(val => {
-                    if (Array.isArray(val)) totalVnd += val.reduce((a, b) => a + b, 0);
-                    else if (typeof val === 'number') totalVnd += val;
+                    if (Array.isArray(val)) {
+                        if (monthFilterList) {
+                            monthFilterList.forEach(m => {
+                                const mIdx = m - 1;
+                                if (mIdx >= 0 && mIdx < 12) totalVnd += (Number(val[mIdx]) || 0);
+                            });
+                        } else {
+                            totalVnd += val.reduce((a, b) => a + b, 0);
+                        }
+                    } else if (typeof val === 'number') {
+                        if (monthFilterList) {
+                            totalVnd += (val / 12) * monthFilterList.length;
+                        } else {
+                            totalVnd += val;
+                        }
+                    }
                 });
             }
         }
@@ -4636,8 +4936,17 @@
     function renderCbnvTab(searchQuery = '') {
         ensureBaselineCbnvData();
         const displayMode = (state.cbnvConfig && state.cbnvConfig.displayMode) || 'BOTH';
+        const selectedPeriod = (state.cbnvConfig && state.cbnvConfig.selectedPeriod) || 'ALL';
+        const isSingleMonth = selectedPeriod !== 'ALL';
+        const currentMonthNum = isSingleMonth ? parseInt(selectedPeriod, 10) : null;
+        const periodLabel = isSingleMonth ? `Tháng ${currentMonthNum}` : 'Cả năm 2026 (Bình quân)';
 
-        // 1. Cập nhật giao diện nút chuyển đổi Chế độ hiển thị
+        // 1. Cập nhật bộ chọn kỳ / tháng và nút chuyển đổi Chế độ hiển thị
+        const selectPeriod = document.getElementById('select-cbnv-period');
+        if (selectPeriod && selectPeriod.value !== selectedPeriod) {
+            selectPeriod.value = selectedPeriod;
+        }
+
         const btnThucTe = document.getElementById('btn-cbnv-mode-thucte');
         const btnDinhBien = document.getElementById('btn-cbnv-mode-dinhbien');
         const btnBoth = document.getElementById('btn-cbnv-mode-both');
@@ -4661,11 +4970,11 @@
 
         allActiveEntities.forEach(ent => {
             const code = ent.code;
-            const cbnv = state.cbnvData[code] || { dinhBien: 0, thucTe: 0 };
+            const cbnv = getCbnvEntityData(code, selectedPeriod, 2026);
             const dB = Number(cbnv.dinhBien) || 0;
             const tT = Number(cbnv.thucTe) || 0;
-            const c26 = getEntityCostTrD(code, '2026');
-            const c25 = getEntityCostTrD(code, '2025');
+            const c26 = getEntityCostTrD(code, '2026', isSingleMonth ? currentMonthNum : 'ALL');
+            const c25 = getEntityCostTrD(code, '2025', isSingleMonth ? currentMonthNum : 'ALL');
 
             sysDinhBien += dB;
             sysThucTe += tT;
@@ -4678,12 +4987,27 @@
         });
 
         const sysFillRate = sysDinhBien > 0 ? ((sysThucTe / sysDinhBien) * 100).toFixed(1) : '0.0';
-        const sysCphcPerThucTeYear = sysThucTe > 0 ? (sysCost2026 / sysThucTe) : 0;
-        const sysCphcPerThucTeMonth = sysCphcPerThucTeYear / 12;
-        const sysCphcPerDinhBienYear = sysDinhBien > 0 ? (sysCost2026 / sysDinhBien) : 0;
-        const sysCphcPerDinhBienMonth = sysCphcPerDinhBienYear / 12;
+        let sysCphcPerThucTeMonth = 0;
+        let sysCphcPerThucTeYear = 0;
+        let sysCphcPerDinhBienMonth = 0;
+        let sysCphcPerDinhBienYear = 0;
+        let sysCphcPerThucTe2025Year = 0;
 
-        const sysCphcPerThucTe2025Year = sysThucTe > 0 ? (sysCost2025 / sysThucTe) : 0;
+        if (isSingleMonth) {
+            sysCphcPerThucTeMonth = sysThucTe > 0 ? (sysCost2026 / sysThucTe) : 0;
+            sysCphcPerThucTeYear = sysCphcPerThucTeMonth * 12;
+            sysCphcPerDinhBienMonth = sysDinhBien > 0 ? (sysCost2026 / sysDinhBien) : 0;
+            sysCphcPerDinhBienYear = sysCphcPerDinhBienMonth * 12;
+            const sysCphcPerThucTe2025Month = sysThucTe > 0 ? (sysCost2025 / sysThucTe) : 0;
+            sysCphcPerThucTe2025Year = sysCphcPerThucTe2025Month * 12;
+        } else {
+            sysCphcPerThucTeYear = sysThucTe > 0 ? (sysCost2026 / sysThucTe) : 0;
+            sysCphcPerThucTeMonth = sysCphcPerThucTeYear / 12;
+            sysCphcPerDinhBienYear = sysDinhBien > 0 ? (sysCost2026 / sysDinhBien) : 0;
+            sysCphcPerDinhBienMonth = sysCphcPerDinhBienYear / 12;
+            sysCphcPerThucTe2025Year = sysThucTe > 0 ? (sysCost2025 / sysThucTe) : 0;
+        }
+
         const sysYoYDiffAmt = sysCphcPerThucTeYear - sysCphcPerThucTe2025Year;
         const sysYoYDiffPct = sysCphcPerThucTe2025Year > 0 ? ((sysYoYDiffAmt / sysCphcPerThucTe2025Year) * 100) : 0;
 
@@ -4748,7 +5072,7 @@
                             <span class="p-1 rounded bg-amber-200 text-amber-800 font-bold">⚠️</span>
                             <div>
                                 <strong class="font-bold text-amber-950">CẢNH BÁO KIỂM TOÁN NHÂN SỰ:</strong>
-                                <span>Không tìm thấy dòng tổng cộng (CỘNG / TỔNG CỘNG) trong file Excel để đối chiếu — Cần rà soát thủ công (Hệ thống không mặc định báo khớp). Tổng thực tế chi tiết: <strong>${(aud.sumTt || 0).toLocaleString('vi-VN')}</strong> người.</span>
+                                <span>Không tìm thấy dòng tổng cộng (CỘNG / TỔNG CỘNG) trong file Excel để đối chiếu — Cần rà soát thủ công (Hệ thống không mặc định báo khớp). Tổng thực tế chi tiết: <strong>${(aud.sumTt || 0).toLocaleString('vi-VN')}</strong> người. Kỳ đang xem: <strong class="text-blue-900">${periodLabel}</strong>.</span>
                             </div>
                         </div>
                         <button onclick="document.getElementById('cbnv-upload-modal').classList.remove('hidden')" class="px-3 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-lg font-bold text-xs shadow-sm transition-all flex items-center gap-1">
@@ -4762,7 +5086,7 @@
                             <span class="p-1 rounded bg-emerald-200 text-emerald-800 font-bold">✅</span>
                             <div>
                                 <strong class="font-bold text-emerald-950">KIỂM TOÁN NHÂN SỰ: Khớp 100%</strong>
-                                <span>Chênh lệch: <strong class="font-mono text-emerald-950">0 người</strong> (Tổng thực tế: <strong>${(aud.sumTt || 0).toLocaleString('vi-VN')}</strong> người, Định biên: <strong>${(aud.sumDb || 0).toLocaleString('vi-VN')}</strong> người - Khớp tuyệt đối với dòng CỘNG của file gốc).</span>
+                                <span>Chênh lệch: <strong class="font-mono text-emerald-950">0 người</strong> (Tổng thực tế: <strong>${(aud.sumTt || 0).toLocaleString('vi-VN')}</strong> người, Định biên: <strong>${(aud.sumDb || 0).toLocaleString('vi-VN')}</strong> người - Khớp tuyệt đối với dòng CỘNG của file gốc). Kỳ đang xem: <strong class="text-[#00529C]">${periodLabel}</strong>.</span>
                             </div>
                         </div>
                         <span class="px-2.5 py-1 bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-full font-black text-[11px]">
@@ -4790,7 +5114,7 @@
                     <div class="flex items-center gap-2 font-medium">
                         <span class="p-1 rounded bg-rose-200 text-rose-800 font-bold">⚠️</span>
                         <div>
-                            <strong class="font-bold text-rose-950">CẢNH BÁO ĐỐI SOÁT NHÂN SỰ:</strong>
+                            <strong class="font-bold text-rose-950">CẢNH BÁO ĐỐI SOÁT NHÂN SỰ (${periodLabel}):</strong>
                             <span>Phát hiện <strong class="text-rose-700 font-bold">${zeroHeadcountEntities.length}</strong> đơn vị có số liệu nhân sự = 0 hoặc chưa nạp (${zeroHeadcountEntities.join(', ')}). Vui lòng nạp bổ sung file Excel nhân sự để định mức chi phí chuẩn xác.</span>
                         </div>
                     </div>
@@ -4804,7 +5128,7 @@
                     <div class="flex items-center gap-2 font-medium">
                         <span class="p-1 rounded bg-emerald-200 text-emerald-800 font-bold">✅</span>
                         <div>
-                            <strong class="font-bold text-emerald-950">ĐỐI SOÁT NHÂN SỰ TOÀN HỆ THỐNG:</strong>
+                            <strong class="font-bold text-emerald-950">ĐỐI SOÁT NHÂN SỰ TOÀN HỆ THỐNG (${periodLabel}):</strong>
                             <span>100% Đơn vị đã có dữ liệu nhân sự (${allActiveEntities.length} đơn vị, <strong>${sysThucTe.toLocaleString('vi-VN')}</strong> CB-NV thực tế / <strong>${sysDinhBien.toLocaleString('vi-VN')}</strong> định biên). Dữ liệu định mức đạt chuẩn kiểm toán!</span>
                         </div>
                     </div>
@@ -4819,17 +5143,24 @@
         const qClean = (searchQuery || '').toLowerCase().trim();
         const displayEntities = allActiveEntities.filter(ent => {
             if (!qClean) return true;
-            const cbnv = state.cbnvData[ent.code] || {};
+            const cbnv = getCbnvEntityData(ent.code, selectedPeriod, 2026);
             const str = `${ent.code} ${ent.name} ${ent.cleanName || ''} ${cbnv.tenQt || ''} ${cbnv.khoi || ''}`.toLowerCase();
             return str.includes(qClean);
         });
 
         const countBadge = document.getElementById('cbnv-table-count');
-        if (countBadge) countBadge.textContent = `${displayEntities.length} đơn vị`;
+        if (countBadge) countBadge.textContent = `${displayEntities.length} đơn vị (${periodLabel})`;
 
         // 7. Kết xuất Bảng Ma Trận Chi Phí / CB-NV
         const thead = document.getElementById('cbnv-table-head');
         const tbody = document.getElementById('cbnv-table-body');
+
+        const costColHeader = isSingleMonth ? `CPHC T${currentMonthNum}<br/><span class="text-[9px] font-normal">(Tr.đ)</span>` : `Tổng CPHC 2026<br/><span class="text-[9px] font-normal">(Tr.đ)</span>`;
+        const ttYearHeader = isSingleMonth ? `Quy Đổi Cả Năm<br/><span class="text-[9px] font-normal">(Tr.đ / người / năm)</span>` : `CPHC / Thực Tế<br/><span class="text-[9px] font-normal">(Tr.đ / người / năm)</span>`;
+        const ttMonthHeader = isSingleMonth ? `CPHC / Thực Tế T${currentMonthNum}<br/><span class="text-[9px] font-normal">(Tr.đ / người / tháng)</span>` : `Bình Quân Tháng<br/><span class="text-[9px] font-normal">(Tr.đ / người / tháng)</span>`;
+        const dbYearHeader = isSingleMonth ? `Quy Đổi Cả Năm<br/><span class="text-[9px] font-normal">(Tr.đ / người / năm)</span>` : `CPHC / Định Biên<br/><span class="text-[9px] font-normal">(Tr.đ / người / năm)</span>`;
+        const dbMonthHeader = isSingleMonth ? `CPHC / Định Biên T${currentMonthNum}<br/><span class="text-[9px] font-normal">(Tr.đ / người / tháng)</span>` : `Bình Quân Tháng<br/><span class="text-[9px] font-normal">(Tr.đ / người / tháng)</span>`;
+        const prevYearHeader = isSingleMonth ? `Định Mức T${currentMonthNum}/25<br/><span class="text-[9px] font-normal">(Tr.đ / người)</span>` : `Định Mức 2025<br/><span class="text-[9px] font-normal">(Tr.đ / người)</span>`;
 
         if (thead) {
             if (displayMode === 'THUC_TE') {
@@ -4840,10 +5171,10 @@
                         <th class="p-2.5 text-center font-bold border-r border-blue-800 w-24">Mã ĐVCS</th>
                         <th class="p-2.5 font-bold border-r border-blue-800 min-w-[200px]">Tên Pháp Nhân / Showroom</th>
                         <th class="p-2.5 text-right font-bold border-r border-blue-800 w-28 bg-[#004080]">CB-NV Thực Tế</th>
-                        <th class="p-2.5 text-right font-bold border-r border-blue-800 w-32 bg-[#0284C7]">Tổng CPHC 2026<br/><span class="text-[9px] font-normal">(Tr.đ)</span></th>
-                        <th class="p-2.5 text-right font-black border-r border-blue-800 w-36 bg-[#059669]">CPHC / Thực Tế<br/><span class="text-[9px] font-normal">(Tr.đ / người / năm)</span></th>
-                        <th class="p-2.5 text-right font-bold border-r border-blue-800 w-36 bg-[#059669]">CPHC / Thực Tế<br/><span class="text-[9px] font-normal">(Tr.đ / người / tháng)</span></th>
-                        <th class="p-2.5 text-right font-bold border-r border-blue-800 w-32 bg-[#003870]">Định Mức 2025<br/><span class="text-[9px] font-normal">(Tr.đ / người)</span></th>
+                        <th class="p-2.5 text-right font-bold border-r border-blue-800 w-32 bg-[#0284C7]">${costColHeader}</th>
+                        <th class="p-2.5 text-right font-black border-r border-blue-800 w-36 bg-[#059669]">${ttYearHeader}</th>
+                        <th class="p-2.5 text-right font-bold border-r border-blue-800 w-36 bg-[#059669]">${ttMonthHeader}</th>
+                        <th class="p-2.5 text-right font-bold border-r border-blue-800 w-32 bg-[#003870]">${prevYearHeader}</th>
                         <th class="p-2.5 text-right font-bold border-r border-blue-800 w-28">Biến Động YoY</th>
                     </tr>
                 `;
@@ -4855,9 +5186,9 @@
                         <th class="p-2.5 text-center font-bold border-r border-blue-800 w-24">Mã ĐVCS</th>
                         <th class="p-2.5 font-bold border-r border-blue-800 min-w-[200px]">Tên Pháp Nhân / Showroom</th>
                         <th class="p-2.5 text-right font-bold border-r border-blue-800 w-28 bg-[#004080]">Định Biên</th>
-                        <th class="p-2.5 text-right font-bold border-r border-blue-800 w-32 bg-[#0284C7]">Tổng CPHC 2026<br/><span class="text-[9px] font-normal">(Tr.đ)</span></th>
-                        <th class="p-2.5 text-right font-black border-r border-blue-800 w-36 bg-[#4F46E5]">CPHC / Định Biên<br/><span class="text-[9px] font-normal">(Tr.đ / người / năm)</span></th>
-                        <th class="p-2.5 text-right font-bold border-r border-blue-800 w-36 bg-[#4F46E5]">CPHC / Định Biên<br/><span class="text-[9px] font-normal">(Tr.đ / người / tháng)</span></th>
+                        <th class="p-2.5 text-right font-bold border-r border-blue-800 w-32 bg-[#0284C7]">${costColHeader}</th>
+                        <th class="p-2.5 text-right font-black border-r border-blue-800 w-36 bg-[#4F46E5]">${dbYearHeader}</th>
+                        <th class="p-2.5 text-right font-bold border-r border-blue-800 w-36 bg-[#4F46E5]">${dbMonthHeader}</th>
                         <th class="p-2.5 text-right font-bold border-r border-blue-800 w-28">Tỷ Lệ Lấp Đầy</th>
                         <th class="p-2.5 text-right font-bold border-r border-blue-800 w-28">Biến Động YoY</th>
                     </tr>
@@ -4871,20 +5202,20 @@
                         <th rowspan="2" class="p-2.5 text-center font-bold border-r border-blue-800 w-24">Mã ĐVCS</th>
                         <th rowspan="2" class="p-2.5 font-bold border-r border-blue-800 min-w-[190px]">Tên Pháp Nhân / Showroom</th>
                         <th colspan="3" class="p-2 text-center font-bold border-r border-blue-800 bg-[#004080]">QUY MÔ NHÂN SỰ</th>
-                        <th rowspan="2" class="p-2.5 text-right font-bold border-r border-blue-800 w-32 bg-[#0284C7]">Tổng CPHC 2026<br/><span class="text-[9px] font-normal">(Tr.đ)</span></th>
+                        <th rowspan="2" class="p-2.5 text-right font-bold border-r border-blue-800 w-32 bg-[#0284C7]">${costColHeader}</th>
                         <th colspan="2" class="p-2 text-center font-black border-r border-blue-800 bg-[#059669]">THEO THỰC TẾ (TR.Đ)</th>
                         <th colspan="2" class="p-2 text-center font-bold border-r border-blue-800 bg-[#4F46E5]">THEO ĐỊNH BIÊN (TR.Đ)</th>
-                        <th rowspan="2" class="p-2.5 text-right font-bold border-r border-blue-800 w-28 bg-[#003870]">ĐM 2025<br/><span class="text-[9px] font-normal">(Tr.đ/người)</span></th>
+                        <th rowspan="2" class="p-2.5 text-right font-bold border-r border-blue-800 w-28 bg-[#003870]">${prevYearHeader}</th>
                         <th rowspan="2" class="p-2.5 text-right font-bold border-r border-blue-800 w-28">Biến Động YoY</th>
                     </tr>
                     <tr class="bg-[#003870] text-[10px] text-white">
                         <th class="p-1.5 text-right border-r border-blue-800 w-20">Định biên</th>
                         <th class="p-1.5 text-right border-r border-blue-800 w-20">Thực tế</th>
                         <th class="p-1.5 text-center border-r border-blue-800 w-20">% Lấp đầy</th>
-                        <th class="p-1.5 text-right border-r border-blue-800 w-24">Năm</th>
-                        <th class="p-1.5 text-right border-r border-blue-800 w-24">Tháng</th>
-                        <th class="p-1.5 text-right border-r border-blue-800 w-24">Năm</th>
-                        <th class="p-1.5 text-right border-r border-blue-800 w-24">Tháng</th>
+                        <th class="p-1.5 text-right border-r border-blue-800 w-24">${isSingleMonth ? 'Quy đổi năm' : 'Năm'}</th>
+                        <th class="p-1.5 text-right border-r border-blue-800 w-24">${isSingleMonth ? `Tháng ${currentMonthNum}` : 'Tháng'}</th>
+                        <th class="p-1.5 text-right border-r border-blue-800 w-24">${isSingleMonth ? 'Quy đổi năm' : 'Năm'}</th>
+                        <th class="p-1.5 text-right border-r border-blue-800 w-24">${isSingleMonth ? `Tháng ${currentMonthNum}` : 'Tháng'}</th>
                     </tr>
                 `;
             }
@@ -4899,25 +5230,40 @@
 
             displayEntities.forEach((ent, idx) => {
                 const code = ent.code;
-                const cbnv = state.cbnvData[code] || { dinhBien: 0, thucTe: 0, khoi: ent.khoiName || 'VPĐH' };
+                const cbnv = getCbnvEntityData(code, selectedPeriod, 2026);
                 const dB = Number(cbnv.dinhBien) || 0;
                 const tT = Number(cbnv.thucTe) || 0;
                 const fillPct = dB > 0 ? ((tT / dB) * 100) : 0;
 
-                const c26 = getEntityCostTrD(code, '2026');
-                const c25 = getEntityCostTrD(code, '2025');
+                const c26 = getEntityCostTrD(code, '2026', isSingleMonth ? currentMonthNum : 'ALL');
+                const c25 = getEntityCostTrD(code, '2025', isSingleMonth ? currentMonthNum : 'ALL');
 
                 filteredSumDinhBien += dB;
                 filteredSumThucTe += tT;
                 filteredSumCost2026 += c26;
                 filteredSumCost2025 += c25;
 
-                const cphcPerTtYear = tT > 0 ? (c26 / tT) : 0;
-                const cphcPerTtMonth = cphcPerTtYear / 12;
-                const cphcPerDbYear = dB > 0 ? (c26 / dB) : 0;
-                const cphcPerDbMonth = cphcPerDbYear / 12;
+                let cphcPerTtMonth = 0;
+                let cphcPerTtYear = 0;
+                let cphcPerDbMonth = 0;
+                let cphcPerDbYear = 0;
+                let cphcPerTt25Year = 0;
 
-                const cphcPerTt25Year = tT > 0 ? (c25 / tT) : 0;
+                if (isSingleMonth) {
+                    cphcPerTtMonth = tT > 0 ? (c26 / tT) : 0;
+                    cphcPerTtYear = cphcPerTtMonth * 12;
+                    cphcPerDbMonth = dB > 0 ? (c26 / dB) : 0;
+                    cphcPerDbYear = cphcPerDbMonth * 12;
+                    const cphcPerTt25Month = tT > 0 ? (c25 / tT) : 0;
+                    cphcPerTt25Year = cphcPerTt25Month * 12;
+                } else {
+                    cphcPerTtYear = tT > 0 ? (c26 / tT) : 0;
+                    cphcPerTtMonth = cphcPerTtYear / 12;
+                    cphcPerDbYear = dB > 0 ? (c26 / dB) : 0;
+                    cphcPerDbMonth = cphcPerDbYear / 12;
+                    cphcPerTt25Year = tT > 0 ? (c25 / tT) : 0;
+                }
+
                 const yoyDiff = cphcPerTt25Year > 0 ? ((cphcPerTtYear - cphcPerTt25Year) / cphcPerTt25Year * 100) : 0;
                 const sign = yoyDiff >= 0 ? '+' : '';
 
@@ -4952,7 +5298,7 @@
                         <td class="p-2 text-right border-r border-slate-200 font-mono font-bold text-sky-900 bg-sky-50/30">${formatNumber(c26)}</td>
                         <td class="p-2 text-right border-r border-slate-200 font-mono font-black text-emerald-700 bg-emerald-50/40">${cphcPerTtYear.toFixed(1)}</td>
                         <td class="p-2 text-right border-r border-slate-200 font-mono font-bold text-emerald-800">${cphcPerTtMonth.toFixed(2)}</td>
-                        <td class="p-2 text-right border-r border-slate-200 font-mono text-slate-600">${cphcPerTt25Year > 0 ? cphcPerTt25Year.toFixed(1) : '-'}</td>
+                        <td class="p-2 text-right border-r border-slate-200 font-mono text-slate-600">${cphcPerTt25Year > 0 ? (isSingleMonth ? (cphcPerTt25Year / 12).toFixed(2) : cphcPerTt25Year.toFixed(1)) : '-'}</td>
                         <td class="p-2 text-right border-r border-slate-200 font-mono">${yoyBadge}</td>
                     `;
                 } else if (displayMode === 'DINH_BIEN') {
@@ -4983,7 +5329,7 @@
                         <td class="p-2 text-right border-r border-slate-200 font-mono text-emerald-800">${cphcPerTtMonth.toFixed(2)}</td>
                         <td class="p-2 text-right border-r border-slate-200 font-mono font-bold text-indigo-700 bg-indigo-50/30">${cphcPerDbYear.toFixed(1)}</td>
                         <td class="p-2 text-right border-r border-slate-200 font-mono text-indigo-800">${cphcPerDbMonth.toFixed(2)}</td>
-                        <td class="p-2 text-right border-r border-slate-200 font-mono text-slate-600">${cphcPerTt25Year > 0 ? cphcPerTt25Year.toFixed(1) : '-'}</td>
+                        <td class="p-2 text-right border-r border-slate-200 font-mono text-slate-600">${cphcPerTt25Year > 0 ? (isSingleMonth ? (cphcPerTt25Year / 12).toFixed(2) : cphcPerTt25Year.toFixed(1)) : '-'}</td>
                         <td class="p-2 text-right border-r border-slate-200 font-mono">${yoyBadge}</td>
                     `;
                 }
@@ -4992,11 +5338,27 @@
             });
 
             // Hàng Tổng Cộng Footer
-            const fTtPerYear = filteredSumThucTe > 0 ? (filteredSumCost2026 / filteredSumThucTe) : 0;
-            const fTtPerMonth = fTtPerYear / 12;
-            const fDbPerYear = filteredSumDinhBien > 0 ? (filteredSumCost2026 / filteredSumDinhBien) : 0;
-            const fDbPerMonth = fDbPerYear / 12;
-            const fTt25PerYear = filteredSumThucTe > 0 ? (filteredSumCost2025 / filteredSumThucTe) : 0;
+            let fTtPerYear = 0;
+            let fTtPerMonth = 0;
+            let fDbPerYear = 0;
+            let fDbPerMonth = 0;
+            let fTt25PerYear = 0;
+
+            if (isSingleMonth) {
+                fTtPerMonth = filteredSumThucTe > 0 ? (filteredSumCost2026 / filteredSumThucTe) : 0;
+                fTtPerYear = fTtPerMonth * 12;
+                fDbPerMonth = filteredSumDinhBien > 0 ? (filteredSumCost2026 / filteredSumDinhBien) : 0;
+                fDbPerYear = fDbPerMonth * 12;
+                const fTt25PerMonth = filteredSumThucTe > 0 ? (filteredSumCost2025 / filteredSumThucTe) : 0;
+                fTt25PerYear = fTt25PerMonth * 12;
+            } else {
+                fTtPerYear = filteredSumThucTe > 0 ? (filteredSumCost2026 / filteredSumThucTe) : 0;
+                fTtPerMonth = fTtPerYear / 12;
+                fDbPerYear = filteredSumDinhBien > 0 ? (filteredSumCost2026 / filteredSumDinhBien) : 0;
+                fDbPerMonth = fDbPerYear / 12;
+                fTt25PerYear = filteredSumThucTe > 0 ? (filteredSumCost2025 / filteredSumThucTe) : 0;
+            }
+
             const fYoYDiff = fTt25PerYear > 0 ? ((fTtPerYear - fTt25PerYear) / fTt25PerYear * 100) : 0;
             const fSign = fYoYDiff >= 0 ? '+' : '';
             const fFillPct = filteredSumDinhBien > 0 ? ((filteredSumThucTe / filteredSumDinhBien) * 100) : 0;
@@ -5011,7 +5373,7 @@
                     <td class="p-2.5 text-right border-r border-blue-800 font-mono text-cyan-200 font-bold">${formatNumber(filteredSumCost2026)}</td>
                     <td class="p-2.5 text-right border-r border-blue-800 font-mono text-emerald-300 font-black">${fTtPerYear.toFixed(1)}</td>
                     <td class="p-2.5 text-right border-r border-blue-800 font-mono text-emerald-200 font-bold">${fTtPerMonth.toFixed(2)}</td>
-                    <td class="p-2.5 text-right border-r border-blue-800 font-mono text-slate-300">${fTt25PerYear > 0 ? fTt25PerYear.toFixed(1) : '-'}</td>
+                    <td class="p-2.5 text-right border-r border-blue-800 font-mono text-slate-300">${fTt25PerYear > 0 ? (isSingleMonth ? (fTt25PerYear / 12).toFixed(2) : fTt25PerYear.toFixed(1)) : '-'}</td>
                     <td class="p-2.5 text-right border-r border-blue-800 font-mono text-amber-300">${fSign}${fYoYDiff.toFixed(1)}%</td>
                 `;
             } else if (displayMode === 'DINH_BIEN') {
@@ -5035,7 +5397,7 @@
                     <td class="p-2 text-right border-r border-blue-800 font-mono text-emerald-200">${fTtPerMonth.toFixed(2)}</td>
                     <td class="p-2 text-right border-r border-blue-800 font-mono text-indigo-300 font-bold">${fDbPerYear.toFixed(1)}</td>
                     <td class="p-2 text-right border-r border-blue-800 font-mono text-indigo-200">${fDbPerMonth.toFixed(2)}</td>
-                    <td class="p-2 text-right border-r border-blue-800 font-mono text-slate-300">${fTt25PerYear > 0 ? fTt25PerYear.toFixed(1) : '-'}</td>
+                    <td class="p-2 text-right border-r border-blue-800 font-mono text-slate-300">${fTt25PerYear > 0 ? (isSingleMonth ? (fTt25PerYear / 12).toFixed(2) : fTt25PerYear.toFixed(1)) : '-'}</td>
                     <td class="p-2 text-right border-r border-blue-800 font-mono text-amber-300">${fSign}${fYoYDiff.toFixed(1)}%</td>
                 `;
             }
@@ -5044,14 +5406,18 @@
         }
 
         // 8. Kết xuất 2 Biểu đồ Phân tích (Benchmark Bar Chart & Scatter Correlation)
-        renderCbnvCharts(displayEntities, sysCphcPerThucTeYear, sysCphcPerDinhBienYear, displayMode);
+        renderCbnvCharts(displayEntities, sysCphcPerThucTeYear, sysCphcPerDinhBienYear, displayMode, selectedPeriod);
     }
 
     /**
      * Vẽ Biểu đồ Benchmark và Tương quan cho Tab CB-NV
      */
-    function renderCbnvCharts(entitiesList, sysBenchmarkThucTe, sysBenchmarkDinhBien, displayMode) {
+    function renderCbnvCharts(entitiesList, sysBenchmarkThucTe, sysBenchmarkDinhBien, displayMode, selectedPeriod = 'ALL') {
         if (typeof Chart === 'undefined') return;
+
+        const isSingleMonth = selectedPeriod !== 'ALL';
+        const currentMonthNum = isSingleMonth ? parseInt(selectedPeriod, 10) : null;
+        const periodNote = isSingleMonth ? `(Tháng ${currentMonthNum} - Quy đổi năm)` : '(Cả năm 2026)';
 
         // Biểu đồ 1: Benchmark Chi phí / Người vs Bình quân Hệ thống
         const benchmarkCtx = document.getElementById('chart-cbnv-benchmark');
@@ -5064,17 +5430,29 @@
             // Sắp xếp đơn vị theo định mức chi phí giảm dần
             const sortedList = [...entitiesList].map(ent => {
                 const code = ent.code;
-                const cbnv = state.cbnvData[code] || { dinhBien: 0, thucTe: 0 };
+                const cbnv = getCbnvEntityData(code, selectedPeriod, 2026);
                 const tT = Number(cbnv.thucTe) || 0;
                 const dB = Number(cbnv.dinhBien) || 0;
-                const c26 = getEntityCostTrD(code, '2026');
-                const rateTt = tT > 0 ? (c26 / tT) : 0;
-                const rateDb = dB > 0 ? (c26 / dB) : 0;
+                const c26 = getEntityCostTrD(code, '2026', isSingleMonth ? currentMonthNum : 'ALL');
+                
+                let rateTt = 0;
+                let rateDb = 0;
+                if (isSingleMonth) {
+                    const rTtM = tT > 0 ? (c26 / tT) : 0;
+                    rateTt = rTtM * 12;
+                    const rDbM = dB > 0 ? (c26 / dB) : 0;
+                    rateDb = rDbM * 12;
+                } else {
+                    rateTt = tT > 0 ? (c26 / tT) : 0;
+                    rateDb = dB > 0 ? (c26 / dB) : 0;
+                }
+
                 return {
                     code: code,
                     label: ent.cleanName || ent.name || code,
                     rateTt: parseFloat(rateTt.toFixed(1)),
                     rateDb: parseFloat(rateDb.toFixed(1)),
+                    rateTtMonth: parseFloat((rateTt / 12).toFixed(2)),
                     thucTe: tT,
                     dinhBien: dB,
                     cost: c26
@@ -5087,7 +5465,7 @@
             if (displayMode === 'BOTH' || displayMode === 'THUC_TE') {
                 datasets.push({
                     type: 'bar',
-                    label: 'CPHC / CB-NV Thực Tế (Tr.đ/người/năm)',
+                    label: `CPHC / CB-NV Thực Tế ${periodNote}`,
                     data: sortedList.map(item => item.rateTt),
                     backgroundColor: 'rgba(0, 82, 156, 0.85)',
                     borderColor: '#00529C',
@@ -5100,7 +5478,7 @@
             if (displayMode === 'BOTH' || displayMode === 'DINH_BIEN') {
                 datasets.push({
                     type: 'bar',
-                    label: 'CPHC / Định Biên (Tr.đ/người/năm)',
+                    label: `CPHC / Định Biên ${periodNote}`,
                     data: sortedList.map(item => item.rateDb),
                     backgroundColor: 'rgba(99, 102, 241, 0.75)',
                     borderColor: '#6366F1',
@@ -5114,7 +5492,7 @@
             const benchmarkLineVal = displayMode === 'DINH_BIEN' ? sysBenchmarkDinhBien : sysBenchmarkThucTe;
             datasets.push({
                 type: 'line',
-                label: `Bình quân Hệ thống (${benchmarkLineVal.toFixed(1)} Tr.đ/người)`,
+                label: `Bình quân Hệ thống (${benchmarkLineVal.toFixed(1)} Tr.đ/người/năm)`,
                 data: Array(sortedList.length).fill(parseFloat(benchmarkLineVal.toFixed(1))),
                 borderColor: '#D97706',
                 borderWidth: 2.5,
@@ -5148,7 +5526,9 @@
                         tooltip: {
                             callbacks: {
                                 label: function(context) {
-                                    return `${context.dataset.label}: ${context.raw.toLocaleString('vi-VN')} Tr.đ/người`;
+                                    const rawVal = context.raw || 0;
+                                    const mVal = (rawVal / 12).toFixed(2);
+                                    return `${context.dataset.label}: ${rawVal.toLocaleString('vi-VN')} Tr.đ/năm (${mVal} Tr.đ/tháng)`;
                                 }
                             }
                         }
@@ -5158,7 +5538,7 @@
                             beginAtZero: true,
                             title: {
                                 display: true,
-                                text: 'Định mức CPHC (Tr.đ / người / năm)',
+                                text: isSingleMonth ? `Định mức Quy đổi Cả Năm T${currentMonthNum} (Tr.đ / người / năm)` : 'Định mức CPHC Cả Năm (Tr.đ / người / năm)',
                                 font: { size: 10, weight: 'bold' }
                             },
                             grid: { color: '#f1f5f9' }
@@ -5186,10 +5566,11 @@
 
             const scatterPoints = entitiesList.map(ent => {
                 const code = ent.code;
-                const cbnv = state.cbnvData[code] || { dinhBien: 0, thucTe: 0 };
+                const cbnv = getCbnvEntityData(code, selectedPeriod, 2026);
                 const tT = Number(cbnv.thucTe) || 0;
-                const c26 = getEntityCostTrD(code, '2026');
-                const rate = tT > 0 ? (c26 / tT).toFixed(1) : 0;
+                const c26 = getEntityCostTrD(code, '2026', isSingleMonth ? currentMonthNum : 'ALL');
+                const rateMonth = tT > 0 ? (c26 / (isSingleMonth ? tT : (tT * 12))).toFixed(2) : 0;
+                const rateYear = tT > 0 ? (c26 / tT * (isSingleMonth ? 12 : 1)).toFixed(1) : 0;
 
                 let color = 'rgba(0, 82, 156, 0.7)'; // VPĐH
                 if (cbnv.khoi === 'Nhà máy') color = 'rgba(16, 185, 129, 0.7)';
@@ -5201,7 +5582,8 @@
                     y: parseFloat(c26.toFixed(1)),
                     label: ent.cleanName || ent.name || code,
                     khoi: cbnv.khoi || 'VPĐH',
-                    rate: rate,
+                    rateYear: rateYear,
+                    rateMonth: rateMonth,
                     color: color
                 };
             });
@@ -5229,8 +5611,8 @@
                                     return [
                                         `🏢 ${p.label} [${p.khoi}]`,
                                         `👥 Nhân sự: ${p.x.toLocaleString('vi-VN')} người`,
-                                        `💰 Tổng CPHC 2026: ${p.y.toLocaleString('vi-VN')} Tr.đ`,
-                                        `⚡ Định mức: ${p.rate} Tr.đ / người / năm`
+                                        `💰 Chi phí (${periodNote}): ${p.y.toLocaleString('vi-VN')} Tr.đ`,
+                                        `⚡ Định mức: ${p.rateYear} Tr.đ/năm (${p.rateMonth} Tr.đ/tháng)`
                                     ];
                                 }
                             }
@@ -5250,7 +5632,7 @@
                             beginAtZero: true,
                             title: {
                                 display: true,
-                                text: 'Tổng Chi phí Hành chính 2026 (Tr.đ)',
+                                text: isSingleMonth ? `Chi phí Hành chính Tháng ${currentMonthNum} (Tr.đ)` : 'Tổng Chi phí Hành chính Cả Năm (Tr.đ)',
                                 font: { size: 10, weight: 'bold' }
                             },
                             grid: { color: '#f1f5f9' }
@@ -5311,6 +5693,7 @@
                 // 1. Quét tìm dòng tiêu đề
                 let headerRowIdx = 0;
                 let colMa = -1, colTen = -1, colDb = -1, colTt = -1, colKhoi = -1, colNote = -1;
+                let colMaQt = -1, colTenQt = -1, colNam = -1, colThang = -1;
 
                 for (let r = 0; r < Math.min(20, rows.length); r++) {
                     const rowCells = (rows[r] || []).map(c => String(c || '').toLowerCase().trim());
@@ -5318,6 +5701,10 @@
                         const h = rowCells[c];
                         if (h.includes('mã đv') || h.includes('mã đvcs') || h.includes('mã pn') || h.includes('mã pháp nhân') || h === 'mã' || h === 'code') colMa = c;
                         else if (h.includes('tên đơn vị') || h.includes('tên pháp nhân') || h.includes('tên showroom') || h.includes('tên đvcs') || h === 'đơn vị' || h === 'tên') colTen = c;
+                        else if (h.includes('mã qt') || h.includes('mã quản trị') || h.includes('ma quan tri')) colMaQt = c;
+                        else if (h.includes('tên qt') || h.includes('tên quản trị') || h.includes('ten quan tri')) colTenQt = c;
+                        else if (h.includes('năm') || h.includes('nam') || h === 'year') colNam = c;
+                        else if (h.includes('tháng') || h.includes('thang') || h.includes('kỳ') || h.includes('ky') || h === 'month') colThang = c;
                         else if (h.includes('định biên') || h.includes('dinh bien') || h.includes('kế hoạch')) colDb = c;
                         else if (h.includes('thực tế') || h.includes('thuc te') || h.includes('hiện có') || h.includes('nhân sự')) colTt = c;
                         else if (h.includes('khối') || h.includes('khoi')) colKhoi = c;
@@ -5329,10 +5716,27 @@
                     }
                 }
 
-                if (colMa === -1) colMa = 0;
-                if (colTen === -1) colTen = 1;
-                if (colDb === -1) colDb = 2;
-                if (colTt === -1) colTt = 3;
+                // Fallback nếu file chuẩn 11 cột
+                const numHeaderCols = (rows[headerRowIdx] || []).length;
+                if (colMa === -1) colMa = numHeaderCols >= 11 ? 4 : 0;
+                if (colTen === -1) colTen = numHeaderCols >= 11 ? 5 : 1;
+                if (colKhoi === -1 && numHeaderCols >= 11) colKhoi = 1;
+                if (colMaQt === -1 && numHeaderCols >= 11) colMaQt = 2;
+                if (colTenQt === -1 && numHeaderCols >= 11) colTenQt = 3;
+                if (colNam === -1 && numHeaderCols >= 11) colNam = 6;
+                if (colThang === -1 && numHeaderCols >= 11) colThang = 7;
+                if (colDb === -1) colDb = numHeaderCols >= 11 ? 8 : 2;
+                if (colTt === -1) colTt = numHeaderCols >= 11 ? 9 : 3;
+                if (colNote === -1 && numHeaderCols >= 11) colNote = 10;
+
+                // Xác định tháng mặc định nếu file không có cột Tháng
+                let uploadMonthFallback = 7;
+                const selUploadMonth = document.getElementById('select-cbnv-upload-month');
+                if (selUploadMonth && selUploadMonth.value !== 'AUTO') {
+                    uploadMonthFallback = parseInt(selUploadMonth.value, 10) || 7;
+                } else if (state.cbnvConfig && state.cbnvConfig.selectedPeriod && state.cbnvConfig.selectedPeriod !== 'ALL') {
+                    uploadMonthFallback = parseInt(state.cbnvConfig.selectedPeriod, 10) || 7;
+                }
 
                 // 2. Phân tích các dòng dữ liệu & tìm dòng đối chiếu kiểm toán (CỘNG / TỔNG CỘNG)
                 const parsedRows = [];
@@ -5370,15 +5774,36 @@
 
                     if (!rawMa && !rawTen) continue;
 
-                    const khoi = colKhoi !== -1 ? String(row[colKhoi] || '').trim() : '';
+                    const khoi = colKhoi !== -1 ? String(row[colKhoi] || '').trim() : 'VPĐH';
+                    const maQt = colMaQt !== -1 ? String(row[colMaQt] || '').trim() : '';
+                    const tenQt = colTenQt !== -1 ? String(row[colTenQt] || '').trim() : '';
                     const note = colNote !== -1 ? String(row[colNote] || '').trim() : '';
 
+                    // Xử lý Tháng
+                    let thang = uploadMonthFallback;
+                    if (colThang !== -1 && row[colThang] !== '' && row[colThang] !== null && row[colThang] !== undefined) {
+                        const parsedM = parseInt(String(row[colThang]).replace(/[^0-9]/g, ''), 10);
+                        if (parsedM >= 1 && parsedM <= 12) thang = parsedM;
+                    }
+
+                    // Xử lý Năm (làm sạch chấm phẩy như 2.026 -> 2026)
+                    let nam = 2026;
+                    if (colNam !== -1 && row[colNam] !== '' && row[colNam] !== null && row[colNam] !== undefined) {
+                        const parsedY = parseInt(String(row[colNam]).replace(/[^0-9]/g, ''), 10);
+                        if (parsedY >= 2020 && parsedY <= 2040) nam = parsedY;
+                    }
+
                     parsedRows.push({
+                        stt: parsedRows.length + 1,
+                        khoi: khoi,
+                        maQt: maQt,
+                        tenQt: tenQt,
                         maPn: rawMa,
                         tenPn: rawTen,
+                        nam: nam,
+                        thang: thang,
                         dinhBien: dB,
                         thucTe: tT,
-                        khoi: khoi,
                         ghiChu: note
                     });
                 }
@@ -5483,6 +5908,7 @@
                         <tr class="hover:bg-slate-50 border-b border-slate-100">
                             <td class="px-2.5 py-1.5 font-bold text-blue-900">${escapeHtml(r.maPn)}</td>
                             <td class="px-2.5 py-1.5">${escapeHtml(r.tenPn)}</td>
+                            <td class="px-2.5 py-1.5 text-center font-bold text-blue-700">T${r.thang}/${r.nam}</td>
                             <td class="px-2.5 py-1.5 text-right font-bold">${r.dinhBien.toLocaleString('vi-VN')}</td>
                             <td class="px-2.5 py-1.5 text-right font-bold text-emerald-800">${r.thucTe.toLocaleString('vi-VN')}</td>
                             <td class="px-2.5 py-1.5 text-center">
@@ -5513,31 +5939,56 @@
         }
 
         ensureBaselineCbnvData();
-        let updateCount = 0;
+        if (!state.cbnvRecords || !Array.isArray(state.cbnvRecords)) {
+            state.cbnvRecords = [];
+        }
 
+        const selMode = document.getElementById('select-cbnv-upload-mode');
+        const uploadMode = selMode ? selMode.value : 'upsert'; // 'upsert' | 'overwrite'
+
+        if (uploadMode === 'overwrite') {
+            state.cbnvRecords = [];
+        }
+
+        let updateCount = 0;
         pendingCbnvUploadRows.forEach(item => {
             const code = item.maPn;
             if (!code) return;
 
-            if (!state.cbnvData[code]) {
-                state.cbnvData[code] = {
-                    stt: Object.keys(state.cbnvData).length + 1,
-                    maPn: code,
-                    tenPn: item.tenPn || code,
-                    khoi: item.khoi || 'VPĐH',
-                    nam: 2026,
-                    dinhBien: item.dinhBien,
-                    thucTe: item.thucTe,
-                    ghiChu: item.ghiChu || ''
-                };
+            const nam = item.nam || 2026;
+            const thang = item.thang || 7;
+            const key = (String(code).trim() + '_' + nam + '_' + thang).toUpperCase();
+
+            const existIdx = state.cbnvRecords.findIndex(r => 
+                (String(r.maPn || r.code).trim() + '_' + (r.nam || 2026) + '_' + (r.thang || 1)).toUpperCase() === key
+            );
+
+            const record = {
+                stt: state.cbnvRecords.length + 1,
+                khoi: item.khoi || 'VPĐH',
+                maQt: item.maQt || '',
+                tenQt: item.tenQt || '',
+                maPn: code,
+                tenPn: item.tenPn || code,
+                nam: nam,
+                thang: thang,
+                dinhBien: Number(item.dinhBien) || 0,
+                thucTe: Number(item.thucTe) || 0,
+                ghiChu: item.ghiChu || ''
+            };
+
+            if (existIdx >= 0) {
+                state.cbnvRecords[existIdx] = { ...state.cbnvRecords[existIdx], ...record, stt: state.cbnvRecords[existIdx].stt };
             } else {
-                state.cbnvData[code].dinhBien = item.dinhBien;
-                state.cbnvData[code].thucTe = item.thucTe;
-                if (item.tenPn) state.cbnvData[code].tenPn = item.tenPn;
-                if (item.khoi) state.cbnvData[code].khoi = item.khoi;
-                if (item.ghiChu) state.cbnvData[code].ghiChu = item.ghiChu;
+                state.cbnvRecords.push(record);
             }
             updateCount++;
+        });
+
+        // Tự động đồng bộ view state.cbnvData cho kỳ đang xem
+        const curPeriod = (state.cbnvConfig && state.cbnvConfig.selectedPeriod) || 'ALL';
+        (state.entities || []).forEach(ent => {
+            state.cbnvData[ent.code] = getCbnvEntityData(ent.code, curPeriod, 2026);
         });
 
         if (pendingCbnvAudit) {
@@ -5548,19 +5999,20 @@
         closeCbnvUploadModal();
         renderCbnvTab();
 
-        alert(`✅ CẬP NHẬT THÀNH CÔNG!\nĐã cập nhật dữ liệu định biên và nhân sự thực tế cho ${updateCount} đơn vị.`);
+        const modeText = uploadMode === 'overwrite' ? 'Ghi đè toàn bộ danh mục' : 'Ghi thêm / Cập nhật theo từng tháng';
+        alert(`✅ CẬP NHẬT THÀNH CÔNG!\nĐã nạp ${updateCount} dòng nhân sự (Chế độ: ${modeText}).\nTổng số bản ghi trong bộ nhớ: ${state.cbnvRecords.length} dòng.`);
 
         // Đề xuất đồng bộ lên Google Sheet nếu có kết nối
         const gsheetCfg = getGoogleSheetSyncConfig();
         if (gsheetCfg && gsheetCfg.webAppUrl) {
-            if (confirm('Anh/Chị có muốn đồng bộ danh mục nhân sự mới này lên Google Sheet DM_CBNV không?')) {
-                pushCbnvToGoogleSheet(true);
+            if (confirm(`Anh/Chị có muốn đồng bộ danh mục nhân sự mới này lên Google Sheet DM_CBNV không? (Chế độ: ${uploadMode === 'overwrite' ? 'Ghi đè' : 'Ghi thêm/Cập nhật'})`)) {
+                pushCbnvToGoogleSheet(true, uploadMode);
             }
         }
     }
 
     /**
-     * Tải file Excel mẫu chuẩn nhập nhân sự CB-NV
+     * Tải file Excel mẫu chuẩn nhập nhân sự CB-NV (11 Cột có Tháng)
      */
     function downloadCbnvTemplate() {
         if (!window.XLSX) {
@@ -5569,14 +6021,17 @@
         }
 
         ensureBaselineCbnvData();
+        const curPeriod = (state.cbnvConfig && state.cbnvConfig.selectedPeriod) || '7';
+        const curMonth = curPeriod === 'ALL' ? 7 : (parseInt(curPeriod, 10) || 7);
+
         const aoa = [
-            ['STT', 'Khối Đơn Vị', 'Mã Quản trị', 'Tên Quản trị', 'Mã ĐVCS', 'Tên Pháp Nhân / Showroom', 'Năm', 'Định Biên (Người)', 'Thực Tế (Người)', 'Ghi Chú']
+            ['STT', 'Khối Đơn Vị', 'Mã Quản trị', 'Tên Quản trị', 'Mã ĐVCS', 'Tên Pháp Nhân / Showroom', 'Năm', 'Tháng', 'Định Biên (Người)', 'Thực Tế (Người)', 'Ghi Chú']
         ];
 
         const activeEntities = (state.entities || []).filter(e => e.active !== false);
         activeEntities.forEach((ent, idx) => {
             const code = ent.code;
-            const cbnv = state.cbnvData[code] || { dinhBien: 60, thucTe: 56, khoi: ent.khoiName || 'VPĐH' };
+            const cbnv = getCbnvEntityData(code, curMonth, 2026);
             aoa.push([
                 idx + 1,
                 cbnv.khoi || ent.khoiName || 'VPĐH',
@@ -5585,16 +6040,17 @@
                 code,
                 ent.cleanName || ent.name,
                 2026,
+                curMonth,
                 cbnv.dinhBien || 0,
                 cbnv.thucTe || 0,
-                cbnv.ghiChu || 'Định mức 2026'
+                cbnv.ghiChu || `Định mức T${curMonth}/2026`
             ]);
         });
 
         const wb = XLSX.utils.book_new();
         const ws = createFormattedWorksheet(aoa);
         XLSX.utils.book_append_sheet(wb, ws, 'DM_CBNV');
-        XLSX.writeFile(wb, 'Mau_Nhap_Nhan_Su_CBNV_THACO_AUTO.xlsx');
+        XLSX.writeFile(wb, `Mau_Nhap_Nhan_Su_CBNV_THACO_AUTO_T${curMonth}_2026.xlsx`);
     }
 
     /**
@@ -5607,18 +6063,25 @@
         }
 
         ensureBaselineCbnvData();
+        const selectedPeriod = (state.cbnvConfig && state.cbnvConfig.selectedPeriod) || 'ALL';
+        const isSingleMonth = selectedPeriod !== 'ALL';
+        const currentMonthNum = isSingleMonth ? parseInt(selectedPeriod, 10) : null;
+        const periodTitle = isSingleMonth ? `Tháng ${currentMonthNum}/2026` : 'Cả năm 2026 (Bình quân)';
+
         const activeEntities = (state.entities || []).filter(e => e.active !== false);
         const aoa = [
             ['TẬP ĐOÀN THACO AUTO - BÁO CÁO ĐỊNH MỨC CHI PHÍ HÀNH CHÍNH / CB-NV'],
-            [`Ngày xuất: ${new Date().toLocaleString('vi-VN')} | Đơn vị tiền tệ: Triệu đồng`],
+            [`Kỳ báo cáo: ${periodTitle} | Ngày xuất: ${new Date().toLocaleString('vi-VN')} | Đơn vị tiền tệ: Triệu đồng`],
             [],
             [
                 'STT', 'Khối Đơn Vị', 'Mã ĐVCS', 'Tên Pháp Nhân / Showroom',
+                'Kỳ/Tháng',
                 'Định Biên (Người)', 'Thực Tế (Người)', '% Lấp Đầy',
-                'Tổng CPHC 2026 (Tr.đ)',
+                isSingleMonth ? `Chi phí T${currentMonthNum} (Tr.đ)` : 'Tổng CPHC 2026 (Tr.đ)',
                 'CPHC/Thực Tế (Năm)', 'CPHC/Thực Tế (Tháng)',
                 'CPHC/Định Biên (Năm)', 'CPHC/Định Biên (Tháng)',
-                'CPHC/Người 2025 (Năm)', 'Biến Động YoY (%)'
+                isSingleMonth ? `ĐM T${currentMonthNum}/25 (Tr.đ)` : 'CPHC/Người 2025 (Năm)',
+                'Biến Động YoY (%)'
             ]
         ];
 
@@ -5626,23 +6089,34 @@
 
         activeEntities.forEach((ent, idx) => {
             const code = ent.code;
-            const cbnv = state.cbnvData[code] || { dinhBien: 0, thucTe: 0, khoi: ent.khoiName || 'VPĐH' };
+            const cbnv = getCbnvEntityData(code, selectedPeriod, 2026);
             const dB = Number(cbnv.dinhBien) || 0;
             const tT = Number(cbnv.thucTe) || 0;
             const fillPct = dB > 0 ? (tT / dB) : 0;
-            const c26 = getEntityCostTrD(code, '2026');
-            const c25 = getEntityCostTrD(code, '2025');
+            const c26 = getEntityCostTrD(code, '2026', isSingleMonth ? currentMonthNum : 'ALL');
+            const c25 = getEntityCostTrD(code, '2025', isSingleMonth ? currentMonthNum : 'ALL');
 
             totDb += dB;
             totTt += tT;
             totC26 += c26;
             totC25 += c25;
 
-            const rateTtYear = tT > 0 ? (c26 / tT) : 0;
-            const rateTtMonth = rateTtYear / 12;
-            const rateDbYear = dB > 0 ? (c26 / dB) : 0;
-            const rateDbMonth = rateDbYear / 12;
-            const rateTt25Year = tT > 0 ? (c25 / tT) : 0;
+            let rateTtMonth = 0, rateTtYear = 0, rateDbMonth = 0, rateDbYear = 0, rateTt25Year = 0;
+            if (isSingleMonth) {
+                rateTtMonth = tT > 0 ? (c26 / tT) : 0;
+                rateTtYear = rateTtMonth * 12;
+                rateDbMonth = dB > 0 ? (c26 / dB) : 0;
+                rateDbYear = rateDbMonth * 12;
+                const r25M = tT > 0 ? (c25 / tT) : 0;
+                rateTt25Year = r25M * 12;
+            } else {
+                rateTtYear = tT > 0 ? (c26 / tT) : 0;
+                rateTtMonth = rateTtYear / 12;
+                rateDbYear = dB > 0 ? (c26 / dB) : 0;
+                rateDbMonth = rateDbYear / 12;
+                rateTt25Year = tT > 0 ? (c25 / tT) : 0;
+            }
+
             const yoyPct = rateTt25Year > 0 ? ((rateTtYear - rateTt25Year) / rateTt25Year) : 0;
 
             aoa.push([
@@ -5650,6 +6124,7 @@
                 cbnv.khoi || 'VPĐH',
                 code,
                 ent.cleanName || ent.name,
+                isSingleMonth ? `T${currentMonthNum}` : 'Cả năm',
                 dB,
                 tT,
                 fillPct,
@@ -5658,38 +6133,51 @@
                 rateTtMonth,
                 rateDbYear,
                 rateDbMonth,
-                rateTt25Year,
+                isSingleMonth ? (rateTt25Year / 12) : rateTt25Year,
                 yoyPct
             ]);
         });
 
-        const totTtYear = totTt > 0 ? (totC26 / totTt) : 0;
-        const totTtMonth = totTtYear / 12;
-        const totDbYear = totDb > 0 ? (totC26 / totDb) : 0;
-        const totDbMonth = totDbYear / 12;
-        const totTt25Year = totTt > 0 ? (totC25 / totTt) : 0;
+        let totTtYear = 0, totTtMonth = 0, totDbYear = 0, totDbMonth = 0, totTt25Year = 0;
+        if (isSingleMonth) {
+            totTtMonth = totTt > 0 ? (totC26 / totTt) : 0;
+            totTtYear = totTtMonth * 12;
+            totDbMonth = totDb > 0 ? (totC26 / totDb) : 0;
+            totDbYear = totDbMonth * 12;
+            const t25M = totTt > 0 ? (totC25 / totTt) : 0;
+            totTt25Year = t25M * 12;
+        } else {
+            totTtYear = totTt > 0 ? (totC26 / totTt) : 0;
+            totTtMonth = totTtYear / 12;
+            totDbYear = totDb > 0 ? (totC26 / totDb) : 0;
+            totDbMonth = totDbYear / 12;
+            totTt25Year = totTt > 0 ? (totC25 / totTt) : 0;
+        }
+
         const totYoYPct = totTt25Year > 0 ? ((totTtYear - totTt25Year) / totTt25Year) : 0;
         const totFillPct = totDb > 0 ? (totTt / totDb) : 0;
 
         aoa.push([
             '', 'TỔNG CỘNG HỆ THỐNG', '', '',
+            isSingleMonth ? `T${currentMonthNum}` : 'Cả năm',
             totDb, totTt, totFillPct,
             totC26,
             totTtYear, totTtMonth,
             totDbYear, totDbMonth,
-            totTt25Year, totYoYPct
+            isSingleMonth ? (totTt25Year / 12) : totTt25Year,
+            totYoYPct
         ]);
 
         const wb = XLSX.utils.book_new();
         const ws = createFormattedWorksheet(aoa);
         XLSX.utils.book_append_sheet(wb, ws, 'Dinh_Muc_CPHC_CBNV');
-        XLSX.writeFile(wb, `Bao_Cao_Dinh_Muc_CPHC_CBNV_${new Date().toISOString().slice(0, 10)}.xlsx`);
+        XLSX.writeFile(wb, `Bao_Cao_Dinh_Muc_CPHC_CBNV_${isSingleMonth ? 'T' + currentMonthNum : '2026'}_${new Date().toISOString().slice(0, 10)}.xlsx`);
     }
 
     /**
-     * Đẩy danh mục định biên & nhân sự CB-NV lên Google Sheet DM_CBNV
+     * Đẩy danh mục định biên & nhân sự CB-NV lên Google Sheet DM_CBNV (11 Cột)
      */
-    async function pushCbnvToGoogleSheet(showSuccessAlert = true) {
+    async function pushCbnvToGoogleSheet(showSuccessAlert = true, mode = 'upsert') {
         const config = getGoogleSheetSyncConfig();
         if (!config.webAppUrl) {
             alert('Chưa cấu hình URL Google Apps Script Web App! Vui lòng vào tab Đồng bộ Sheet để cấu hình.');
@@ -5697,13 +6185,15 @@
         }
 
         ensureBaselineCbnvData();
-        const cbnvList = Object.values(state.cbnvData);
+        const cbnvRecordsToSend = (state.cbnvRecords && state.cbnvRecords.length > 0) ? 
+            state.cbnvRecords : Object.values(state.cbnvData);
 
         try {
             const payload = {
                 action: 'save_cbnv',
                 api_key: config.apiKey || '',
-                cbnvData: cbnvList
+                mode: mode || 'upsert',
+                cbnvData: cbnvRecordsToSend
             };
 
             const resp = await fetch(config.webAppUrl, {
@@ -5718,7 +6208,7 @@
                 config.lastSynced = new Date().toISOString();
                 saveGoogleSheetSyncConfig(config);
                 if (showSuccessAlert) {
-                    alert(data.message || `Đã đẩy thành công ${cbnvList.length} dòng nhân sự lên sheet DM_CBNV!`);
+                    alert(data.message || `Đã đẩy thành công ${cbnvRecordsToSend.length} dòng nhân sự lên sheet DM_CBNV!`);
                 }
             } else {
                 alert('Lỗi khi lưu lên Google Sheet DM_CBNV: ' + (data.message || 'Không thành công'));
@@ -5729,7 +6219,7 @@
     }
 
     /**
-     * Tải danh mục định biên & nhân sự CB-NV từ Google Sheet DM_CBNV
+     * Tải danh mục định biên & nhân sự CB-NV từ Google Sheet DM_CBNV (11 Cột)
      */
     async function syncCbnvFromGoogleSheet(showSuccessAlert = true) {
         const config = getGoogleSheetSyncConfig();
@@ -5744,23 +6234,25 @@
             const resp = await fetch(url);
             const data = await resp.json();
 
-            if (data.code === 401 || (data.status === 'error' && data.code === 401)) {
-                alert('Khóa bảo mật API_KEY không đúng (Lỗi 401). Vui lòng kiểm tra lại trong Cài đặt kết nối.');
+            if (data.status === 'error' || data.code === 401 || data.code === '401') {
+                alert(`Khóa bảo mật API_KEY không đúng hoặc xảy ra lỗi: ${data.message || 'Lỗi 401'}. Vui lòng kiểm tra lại trong Cài đặt kết nối.`);
                 return;
             }
 
             if (data.status === 'success' && Array.isArray(data.cbnvData)) {
+                state.cbnvRecords = data.cbnvData;
                 if (!state.cbnvData) state.cbnvData = {};
-                data.cbnvData.forEach(item => {
-                    const code = item.maPn || item.code;
-                    if (code) {
-                        state.cbnvData[code] = item;
-                    }
+
+                // Cập nhật lại view active cho state.cbnvData theo kỳ đang xem
+                const curPeriod = (state.cbnvConfig && state.cbnvConfig.selectedPeriod) || 'ALL';
+                (state.entities || []).forEach(ent => {
+                    state.cbnvData[ent.code] = getCbnvEntityData(ent.code, curPeriod, 2026);
                 });
+
                 saveCurrentState();
                 renderCbnvTab();
                 if (showSuccessAlert) {
-                    alert(`Đã tải thành công ${data.cbnvData.length} dòng nhân sự từ Google Sheet DM_CBNV!`);
+                    alert(`Đã tải thành công ${data.cbnvData.length} dòng nhân sự (11 cột) từ Google Sheet DM_CBNV!`);
                 }
             } else {
                 alert('Lỗi tải DM_CBNV từ Google Sheet: ' + (data.message || 'Không có dữ liệu.'));
@@ -6707,7 +7199,24 @@
         return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
     }
 
-    window.THACO_APP = { state, processGoogleSheetData, syncFromGoogleSheet, calculateReportData, resetToBaseline, openUploadModal, openCbnvUploadModal, renderCbnvTab, setCbnvDisplayMode, init };
+    window.THACO_APP = { 
+        state, 
+        processGoogleSheetData, 
+        syncFromGoogleSheet, 
+        calculateReportData, 
+        resetToBaseline, 
+        openUploadModal, 
+        openCbnvUploadModal, 
+        renderCbnvTab, 
+        setCbnvDisplayMode, 
+        init,
+        checkUrlConnectionParams,
+        getGoogleSheetSyncConfig,
+        saveGoogleSheetSyncConfig,
+        openGoogleSheetConfigModal,
+        showSyncErrorBanner,
+        hideSyncErrorBanner
+    };
 
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', init);

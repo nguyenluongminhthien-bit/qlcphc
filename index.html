@@ -169,6 +169,51 @@
         </div>
     </header>
 
+    <!-- Connection Error Alert Banner -->
+    <div id="gsheet-sync-error-banner"
+        class="hidden bg-gradient-to-r from-rose-700 via-rose-600 to-red-700 text-white px-6 py-2.5 text-xs font-semibold flex items-center justify-between shadow-md z-40 border-b border-rose-800">
+        <div class="flex items-center gap-2.5">
+            <span class="p-1 bg-white/20 rounded-md">
+                <svg class="w-4 h-4 text-amber-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+            </span>
+            <div>
+                <strong class="font-extrabold text-white">CẢNH BÁO KẾT NỐI:</strong>
+                <span id="gsheet-sync-error-text" class="ml-1 text-rose-100">Không thể kết nối với Google Sheet. Đang hiển thị dữ liệu dự phòng.</span>
+            </div>
+        </div>
+        <div class="flex items-center gap-2">
+            <button id="btn-banner-check-config"
+                class="px-2.5 py-1 bg-white text-rose-800 hover:bg-rose-50 rounded font-bold text-[11px] shadow-sm transition-all">
+                ⚙️ Kiểm tra Cấu hình
+            </button>
+            <button id="btn-banner-close-error"
+                class="p-1 hover:bg-white/20 rounded text-rose-200 hover:text-white transition-all">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+            </button>
+        </div>
+    </div>
+
+    <!-- Global Loading Overlay for URL Auto-Sync -->
+    <div id="gsheet-loading-overlay"
+        class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[99999] flex flex-col items-center justify-center p-4">
+        <div class="bg-white rounded-2xl p-6 shadow-2xl border border-slate-200 max-w-sm w-full text-center flex flex-col items-center gap-4">
+            <div class="relative flex items-center justify-center">
+                <div class="w-12 h-12 rounded-full border-4 border-blue-200 border-t-[#00529C] animate-spin"></div>
+                <span class="absolute text-lg">⚡</span>
+            </div>
+            <div>
+                <h3 class="text-sm font-bold text-slate-900" id="gsheet-loading-title">Đang kết nối Google Sheet</h3>
+                <p class="text-xs text-slate-500 mt-1" id="gsheet-loading-desc">Đang tải dữ liệu thực tế từ Google Sheet...</p>
+            </div>
+            <span class="text-[10px] text-blue-600 font-mono bg-blue-50 px-2.5 py-1 rounded-full border border-blue-100">
+                Live Sync Engine • THACO AUTO
+            </span>
+        </div>
+    </div>
+
     <!-- Smart Slicers Control Bar (Nền Trắng Sáng) - Đặt phía trên Nhãn Thống kê -->
     <div class="bg-white border-b border-slate-200 px-6 py-3 shadow-sm">
         <div class="flex flex-wrap items-center justify-between gap-3">
@@ -269,7 +314,6 @@
                             d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
                     </svg>
                     <span class="whitespace-nowrap">Chi phí / CB-NV</span>
-                    <span class="px-1.5 py-0.2 text-[9px] font-black bg-blue-100 text-blue-800 rounded-full border border-blue-200">Mục 2.5</span>
                 </button>
                 <button id="tab-dashboard-btn" data-tab="dashboard"
                     class="tab-btn relative z-10 px-3.5 py-1.5 text-xs font-bold text-slate-600 hover:text-[#00529C] transition-colors duration-200 inline-flex flex-row items-center gap-2 whitespace-nowrap shrink-0 rounded-lg">
@@ -581,7 +625,7 @@
             </div>
         </div>
 
-        <!-- Tab 2: Chi phí / CB-NV Section (Mục 2.5 - Vị trí độc lập thứ 2 sau Báo cáo) -->
+        <!-- Tab 2: Chi phí / CB-NV Section - Phân tích Định mức Chi phí Hành chính / Cán bộ - Nhân viên (CB-NV) -->
         <div id="cbnv-section" class="hidden flex-1 flex flex-col min-h-0 bg-slate-50 border border-slate-200 rounded-xl p-4 overflow-auto shadow-lg space-y-4">
             <!-- Top Controls Bar -->
             <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-wrap items-center justify-between gap-3">
@@ -593,7 +637,6 @@
                         <div>
                             <h2 class="text-base font-bold text-slate-900 flex items-center gap-2">
                                 Phân tích Định mức Chi phí Hành chính / Cán bộ - Nhân viên (CB-NV)
-                                <span class="text-xs bg-blue-100 text-[#00529C] px-2 py-0.5 rounded border border-blue-200 font-bold">Mục 2.5</span>
                             </h2>
                             <p class="text-xs text-slate-500">
                                 Đo lường định mức chi phí hành chính bình quân trên mỗi nhân sự (Theo Nhân sự Thực tế & Định biên ngân sách).
@@ -604,6 +647,29 @@
 
                 <!-- Right Action Buttons & Quick Toggle Switch -->
                 <div class="flex items-center gap-2 flex-wrap">
+                    <!-- Bộ lọc Kỳ / Tháng CB-NV -->
+                    <div class="flex items-center gap-1.5 bg-slate-100 p-1 rounded-xl border border-slate-200 text-xs">
+                        <span class="text-[10px] uppercase font-bold text-slate-500 px-1.5 flex items-center gap-1">
+                            <svg class="w-3.5 h-3.5 text-[#00529C]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+                            Kỳ/Tháng:
+                        </span>
+                        <select id="select-cbnv-period" class="bg-white border border-slate-300 rounded-lg px-2 py-1 text-xs text-[#00529C] font-bold focus:outline-none focus:ring-1 focus:ring-[#00529C] cursor-pointer">
+                            <option value="ALL">🗓️ Lũy kế cả năm (Bình quân)</option>
+                            <option value="1">Tháng 1 (T01)</option>
+                            <option value="2">Tháng 2 (T02)</option>
+                            <option value="3">Tháng 3 (T03)</option>
+                            <option value="4">Tháng 4 (T04)</option>
+                            <option value="5">Tháng 5 (T05)</option>
+                            <option value="6">Tháng 6 (T06)</option>
+                            <option value="7">Tháng 7 (T07)</option>
+                            <option value="8">Tháng 8 (T08)</option>
+                            <option value="9">Tháng 9 (T09)</option>
+                            <option value="10">Tháng 10 (T10)</option>
+                            <option value="11">Tháng 11 (T11)</option>
+                            <option value="12">Tháng 12 (T12)</option>
+                        </select>
+                    </div>
+
                     <!-- Quick Toggle Indicator Mode (Thực tế vs Định biên vs Song song) -->
                     <div class="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200 text-xs">
                         <span class="text-[10px] uppercase font-bold text-slate-500 px-1.5">Chỉ số:</span>
@@ -1409,7 +1475,7 @@ function doPost(e) {
         </div>
     </div>
 
-    <!-- Modal Nạp File Excel Nhân Sự CB-NV (Mục 2.5) -->
+    <!-- Modal Nạp File Excel Nhân Sự CB-NV -->
     <div id="cbnv-upload-modal" class="hidden fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
         <div class="bg-white border border-slate-200 rounded-2xl max-w-2xl w-full p-6 shadow-2xl max-h-[90vh] overflow-y-auto space-y-4">
             <div class="flex items-center justify-between pb-3 border-b border-slate-200">
@@ -1419,12 +1485,41 @@ function doPost(e) {
                     </span>
                     <div>
                         <h3 class="text-base font-bold text-slate-900">Nạp File Excel Nhân Sự CB-NV (Định biên & Thực tế)</h3>
-                        <p class="text-xs text-slate-500">Cập nhật số lượng nhân sự các Pháp nhân / Đơn vị phục vụ tính định mức chi phí</p>
+                        <p class="text-xs text-slate-500">Cập nhật số lượng nhân sự các Pháp nhân / Đơn vị theo từng Tháng phục vụ tính định mức</p>
                     </div>
                 </div>
                 <button id="btn-close-cbnv-modal" class="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100">
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
                 </button>
+            </div>
+
+            <!-- Configuration Controls (Tháng áp dụng & Chế độ nạp) -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-slate-50 p-3 rounded-xl border border-slate-200 text-xs">
+                <div>
+                    <label class="block font-bold text-slate-700 mb-1">📅 Tháng áp dụng (nếu file không có cột Tháng):</label>
+                    <select id="select-cbnv-upload-month" class="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 font-bold text-blue-900 focus:ring-1 focus:ring-[#00529C]">
+                        <option value="AUTO">✨ Tự động nhận diện từ file Excel</option>
+                        <option value="1">Tháng 1</option>
+                        <option value="2">Tháng 2</option>
+                        <option value="3">Tháng 3</option>
+                        <option value="4">Tháng 4</option>
+                        <option value="5">Tháng 5</option>
+                        <option value="6">Tháng 6</option>
+                        <option value="7" selected>Tháng 7</option>
+                        <option value="8">Tháng 8</option>
+                        <option value="9">Tháng 9</option>
+                        <option value="10">Tháng 10</option>
+                        <option value="11">Tháng 11</option>
+                        <option value="12">Tháng 12</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block font-bold text-slate-700 mb-1">⚙️ Chế độ nạp dữ liệu:</label>
+                    <select id="select-cbnv-upload-mode" class="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 font-bold text-emerald-800 focus:ring-1 focus:ring-[#00529C]">
+                        <option value="upsert">➕ Ghi thêm / Cập nhật theo tháng (Giữ các tháng khác)</option>
+                        <option value="overwrite">⚠️ Ghi đè toàn bộ danh mục (Xóa sạch dữ liệu cũ)</option>
+                    </select>
+                </div>
             </div>
 
             <!-- Drag & Drop Zone -->
@@ -1433,7 +1528,7 @@ function doPost(e) {
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
                 </svg>
                 <div class="text-sm font-bold text-slate-700">Kéo thả file Excel Nhân sự vào đây, hoặc click để chọn file</div>
-                <div class="text-xs text-slate-400">Hỗ trợ định dạng .xlsx, .xls (Cột chuẩn: Mã ĐV, Tên Đơn vị, Định biên, Thực tế)</div>
+                <div class="text-xs text-slate-400">Hỗ trợ định dạng .xlsx, .xls (Cột chuẩn: Mã ĐV, Tên Đơn vị, Năm, Tháng, Định biên, Thực tế)</div>
                 <input type="file" id="input-cbnv-file" accept=".xlsx, .xls" class="hidden">
             </div>
 
@@ -1455,6 +1550,7 @@ function doPost(e) {
                             <tr>
                                 <th class="px-2.5 py-1.5">Mã ĐV</th>
                                 <th class="px-2.5 py-1.5">Tên Đơn Vị</th>
+                                <th class="px-2.5 py-1.5 text-center">Kỳ/Tháng</th>
                                 <th class="px-2.5 py-1.5 text-right">Định biên</th>
                                 <th class="px-2.5 py-1.5 text-right">Thực tế</th>
                                 <th class="px-2.5 py-1.5 text-center">Trạng thái</th>

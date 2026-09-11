@@ -34,6 +34,29 @@ const server = http.createServer((req, res) => {
     reqPath = '/index.html';
   }
 
+  // Giả lập Web App Google Apps Script (ContentService) cho môi trường kiểm thử trực tiếp
+  if (reqPath === '/api/gas') {
+    const parsedUrl = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+    const key = parsedUrl.searchParams.get('api_key') || parsedUrl.searchParams.get('apiKey');
+    // GAS ContentService LUÔN trả về HTTP 200, lỗi chỉ nằm trong nội dung JSON
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    if (key === 'THACO_CPHC_2026_SECURE_TOKEN') {
+      res.end(JSON.stringify({
+        status: 'success',
+        categories: [],
+        allCostRows: [],
+        message: 'Xác thực API_KEY thành công!'
+      }));
+    } else {
+      res.end(JSON.stringify({
+        status: 'error',
+        code: 401,
+        message: 'Từ chối truy cập: Khóa API_KEY không hợp lệ hoặc chưa được cung cấp. Vui lòng kiểm tra lại cấu hình kết nối trên Web App.'
+      }));
+    }
+    return;
+  }
+
   const filePath = path.join(ROOT_DIR, reqPath);
 
   if (!filePath.startsWith(ROOT_DIR)) {
@@ -77,8 +100,8 @@ server.listen(PORT, () => {
   console.log('👉 Nhấn Ctrl + C để dừng máy chủ');
   console.log('=======================================================');
 
-  // Mở trình duyệt tự động trên Windows
-  if (process.platform === 'win32') {
+  // Mở trình duyệt tự động trên Windows (bỏ qua nếu NO_OPEN=1)
+  if (process.platform === 'win32' && !process.env.NO_OPEN) {
     exec(`start ${url}`);
   }
 });
