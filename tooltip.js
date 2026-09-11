@@ -30,7 +30,10 @@
         if (tooltipEl) return;
         tooltipEl = document.createElement('div');
         tooltipEl.id = 'cost-cell-tooltip';
-        tooltipEl.className = 'fixed hidden pointer-events-none z-[99999] bg-slate-900/95 text-slate-100 p-3 rounded-xl shadow-2xl border border-slate-700/80 backdrop-blur-md text-xs transition-opacity duration-100 w-80 max-w-sm font-sans select-none';
+        tooltipEl.className = 'fixed hidden pointer-events-none z-[99999999] bg-slate-900/95 text-slate-100 p-3 rounded-xl shadow-2xl border border-slate-700/80 backdrop-blur-md text-xs transition-opacity duration-100 w-80 max-w-sm font-sans select-none';
+        tooltipEl.style.setProperty('z-index', '99999999', 'important');
+        tooltipEl.style.setProperty('position', 'fixed', 'important');
+        tooltipEl.style.setProperty('pointer-events', 'none', 'important');
         tooltipEl.style.willChange = 'transform, top, left';
         document.body.appendChild(tooltipEl);
     }
@@ -298,11 +301,15 @@
         `;
 
         tooltipEl.classList.remove('hidden');
+        tooltipEl.style.setProperty('display', 'block', 'important');
+        tooltipEl.style.setProperty('opacity', '1', 'important');
+        tooltipEl.style.setProperty('z-index', '99999999', 'important');
+        tooltipEl.style.setProperty('position', 'fixed', 'important');
         positionTooltip(e);
     }
 
     function positionTooltip(e) {
-        if (!tooltipEl || tooltipEl.classList.contains('hidden')) return;
+        if (!tooltipEl || tooltipEl.style.display === 'none') return;
 
         const pad = 14;
         const tipWidth = tooltipEl.offsetWidth || 280;
@@ -323,13 +330,15 @@
         }
         if (top < 10) top = 10;
 
-        tooltipEl.style.left = `${left}px`;
-        tooltipEl.style.top = `${top}px`;
+        tooltipEl.style.setProperty('left', `${Math.round(left)}px`, 'important');
+        tooltipEl.style.setProperty('top', `${Math.round(top)}px`, 'important');
     }
 
     function hideTooltip() {
         if (tooltipEl) {
             tooltipEl.classList.add('hidden');
+            tooltipEl.style.setProperty('display', 'none', 'important');
+            tooltipEl.style.setProperty('opacity', '0', 'important');
         }
     }
 

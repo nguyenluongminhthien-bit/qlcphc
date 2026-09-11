@@ -2227,7 +2227,7 @@
                     <span class="inline-flex items-center justify-center w-5 h-5 rounded bg-amber-200 text-[#00529C] font-bold text-xs">${isCollapsed ? '+' : '−'}</span>
                 </td>
                 <td colspan="3" class="p-2 text-left text-[#00529C] border-r border-amber-200/80 font-extrabold text-xs cursor-pointer" data-action="toggle-collapse">
-                    <span>📁 ${escapeHtml(grpName)} (${rows.length} khoản mục)</span>
+                    <span>${(window.getGroupIcon ? window.getGroupIcon(grpName) : '📑')} ${escapeHtml(grpName)} (${rows.length} khoản mục)</span>
                 </td>
                 ${grpTdCompare}
                 ${grpActualMonthsTd}
@@ -2646,6 +2646,12 @@
         }
     }
 
+    function renderDashboardCharts() {
+        if (window.THACO_DASHBOARD && typeof window.THACO_DASHBOARD.render === 'function') {
+            window.THACO_DASHBOARD.render();
+        }
+    }
+
     function moveCategoryToGroup(catId, newGroup) {
         const cat = state.categories.find(c => c.id === catId);
         if (cat) {
@@ -2686,7 +2692,7 @@
             headerTr.innerHTML = `
                 <td colspan="4" class="p-2.5 border-r border-slate-200">
                     <div class="flex items-center gap-2">
-                        <span class="text-sm font-extrabold text-[#00529C]">📁 ${escapeHtml(gName)}</span>
+                        <span class="text-sm font-extrabold text-[#00529C]">${(window.getGroupIcon ? window.getGroupIcon(gName) : '📑')} ${escapeHtml(gName)}</span>
                         <span class="bg-[#00529C] text-white px-2 py-0.5 rounded-full text-[10px] font-black">${items.length} khoản mục</span>
                         <span class="text-[10px] text-blue-800/70 font-normal italic">(Kéo & thả khoản mục vào đây để chuyển nhóm)</span>
                     </div>
@@ -3711,334 +3717,15 @@
     }
 
     // ==========================================
-    // 📈 DASHBOARD CHARTS ENGINE
+    // 📈 DASHBOARD CHARTS ENGINE (ỦY QUYỀN CHO MODULE DASHBOARD.JS ĐỘC LẬP)
     // ==========================================
 
-    const activeCharts = {};
-
     function renderDashboardCharts() {
-        if (!window.Chart) return;
-
-        const calcedRows = calculateReportData();
-
-        // CHART 1: MONTHLY TREND
-        const ctxMonthly = document.getElementById('chart-monthly-trend');
-        if (ctxMonthly) {
-            const m25 = Array(12).fill(0);
-            const m26 = Array(12).fill(0);
-
-            calcedRows.forEach(r => {
-                for (let i = 0; i < 12; i++) {
-                    m25[i] += r.monthly2025[i];
-                    m26[i] += r.monthly2026[i];
-                }
-            });
-
-            const labels = ['T01', 'T02', 'T03', 'T04', 'T05', 'T06', 'T07', 'T08', 'T09', 'T10', 'T11', 'T12'];
-
-            if (activeCharts.monthly) activeCharts.monthly.destroy();
-            activeCharts.monthly = new Chart(ctxMonthly, {
-                type: 'line',
-                data: {
-                    labels: labels,
-                    datasets: [
-                        {
-                            label: 'Năm 2025 (Thực tế)',
-                            data: m25.map(v => Math.round(v)),
-                            borderColor: '#94A3B8',
-                            backgroundColor: 'rgba(148, 163, 184, 0.1)',
-                            borderWidth: 2,
-                            fill: true,
-                            tension: 0.3
-                        },
-                        {
-                            label: 'Năm 2026 (Thực tế + AI Dự báo)',
-                            data: m26.map(v => Math.round(v)),
-                            borderColor: '#00529C',
-                            backgroundColor: 'rgba(0, 82, 156, 0.15)',
-                            borderWidth: 3,
-                            fill: true,
-                            tension: 0.3
-                        }
-                    ]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: { position: 'top', labels: { font: { size: 11, weight: 'bold' } } },
-                        tooltip: {
-                            callbacks: {
-                                label: (ctx) => `${ctx.dataset.label}: ${ctx.raw.toLocaleString('vi-VN')} Tr.đ`
-                            }
-                        }
-                    },
-                    scales: {
-                        y: { ticks: { font: { size: 10 } } },
-                        x: { ticks: { font: { size: 10 } } }
-                    }
-                }
-            });
-        }
-
-        // CHART 2: GROUP DOUGHNUT
-        const ctxGroup = document.getElementById('chart-cost-structure');
-        if (ctxGroup) {
-            const grpMap = {};
-            calcedRows.forEach(r => {
-                const g = r.category.group || 'Khác';
-                grpMap[g] = (grpMap[g] || 0) + r.fullYear2026;
-            });
-
-            const labels = Object.keys(grpMap);
-            const data = labels.map(k => Math.round(grpMap[k]));
-            const total = data.reduce((a, b) => a + b, 0);
-
-            if (activeCharts.group) activeCharts.group.destroy();
-            activeCharts.group = new Chart(ctxGroup, {
-                type: 'doughnut',
-                data: {
-                    labels: labels,
-                    datasets: [{
-                        data: data,
-                        backgroundColor: ['#00529C', '#0284C7', '#059669', '#D97706', '#DC2626', '#8B5CF6', '#64748B']
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: { position: 'right', labels: { font: { size: 10, weight: 'bold' } } },
-                        tooltip: {
-                            callbacks: {
-                                label: (ctx) => `${ctx.label}: ${ctx.raw.toLocaleString('vi-VN')} Tr.đ (${((ctx.raw / total) * 100).toFixed(1)}%)`
-                            }
-                        }
-                    }
-                }
-            });
-        }
-
-        // CHART 3: TOP 5 KHOẢN MỤC
-        const ctxTop = document.getElementById('chart-top-categories');
-        if (ctxTop) {
-            const sorted = [...calcedRows].sort((a, b) => b.fullYear2026 - a.fullYear2026).slice(0, 5);
-            const labels = sorted.map(r => r.category.name);
-            const data = sorted.map(r => Math.round(r.fullYear2026));
-
-            if (activeCharts.top) activeCharts.top.destroy();
-            activeCharts.top = new Chart(ctxTop, {
-                type: 'bar',
-                data: {
-                    labels: labels,
-                    datasets: [{
-                        label: 'Dự kiến 2026 (Tr.đ)',
-                        data: data,
-                        backgroundColor: '#00529C',
-                        borderRadius: 4
-                    }]
-                },
-                options: {
-                    indexAxis: 'y',
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: { display: false },
-                        tooltip: {
-                            callbacks: {
-                                label: (ctx) => `${ctx.raw.toLocaleString('vi-VN')} Tr.đ`
-                            }
-                        }
-                    },
-                    scales: {
-                        x: { ticks: { font: { size: 10 } } },
-                        y: { ticks: { font: { size: 10, weight: 'bold' } } }
-                    }
-                }
-            });
-        }
-
-        // CHART 4: SO SÁNH YOY THEO ĐƠN VỊ QUẢN TRỊ (2024 / 2025 / 2026)
-        const ctxYoY = document.getElementById('chart-yoy-comparison');
-        if (ctxYoY) {
-            const qtSet = new Set(state.entities.map(e => e.qt || e.cleanName || e.name).filter(Boolean));
-            const qtList = Array.from(qtSet).slice(0, 8);
-
-            const data24 = [];
-            const data25 = [];
-            const data26 = [];
-
-            qtList.forEach(qt => {
-                const rows = calculateReportData({ quanTri: qt });
-                let tot24 = 0, tot25 = 0, full26 = 0;
-                rows.forEach(r => {
-                    tot24 += (r.total2024 || 0);
-                    tot25 += (r.total2025 || 0);
-                    full26 += (r.fullYear2026 || 0);
-                });
-                data24.push(Math.round(tot24));
-                data25.push(Math.round(tot25));
-                data26.push(Math.round(full26));
-            });
-
-            const mode = (state.compareConfig && state.compareConfig.mode) || '2025';
-            const chartDatasets = [];
-
-            if (mode === '2024') {
-                chartDatasets.push({ label: 'Cả năm 2024', data: data24, backgroundColor: '#8B5CF6', borderRadius: 4 });
-            } else if (mode === '2025') {
-                chartDatasets.push({ label: 'Cả năm 2025', data: data25, backgroundColor: '#94A3B8', borderRadius: 4 });
-            } else if (mode === 'BOTH') {
-                chartDatasets.push({ label: 'Cả năm 2024', data: data24, backgroundColor: '#8B5CF6', borderRadius: 4 });
-                chartDatasets.push({ label: 'Cả năm 2025', data: data25, backgroundColor: '#94A3B8', borderRadius: 4 });
-            }
-
-            chartDatasets.push({ label: 'Dự kiến 2026', data: data26, backgroundColor: '#00529C', borderRadius: 4 });
-
-            if (activeCharts.yoyBar) activeCharts.yoyBar.destroy();
-            activeCharts.yoyBar = new Chart(ctxYoY, {
-                type: 'bar',
-                data: {
-                    labels: qtList,
-                    datasets: chartDatasets
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: { position: 'top', labels: { font: { size: 11, weight: 'bold' } } },
-                        tooltip: {
-                            callbacks: {
-                                label: (ctx) => `${ctx.dataset.label}: ${ctx.raw.toLocaleString('vi-VN')} Tr.đ`
-                            }
-                        }
-                    },
-                    scales: {
-                        y: { ticks: { font: { size: 10 } } },
-                        x: { ticks: { font: { size: 10, weight: 'bold' } } }
-                    }
-                }
-            });
-        }
-
-        // CHART 5: CƠ CẤU CHI PHÍ THEO KHỐI PHÒNG BAN (DOUGHNUT CHART)
-        const ctxDeptBlocks = document.getElementById('chart-dept-blocks');
-        if (ctxDeptBlocks) {
-            const activeCodes = getActiveEntityCodes();
-            const blockSums = {
-                'VP Điều Hành (VPĐH)': 0,
-                'Phân Phối THACO AUTO': 0,
-                'Miền Bắc (MB)': 0,
-                'Miền Nam (MN)': 0,
-                'Chu Lai (KSX)': 0,
-                'Dùng chung & Khác': 0
-            };
-            let hasData = false;
-
-            activeCodes.forEach(code => {
-                if (state.deptData && state.deptData[code]) {
-                    const dRows = state.deptData[code]['2025'] || [];
-                    dRows.forEach(r => {
-                        hasData = true;
-                        const bp = r.bp || '';
-                        const tenBp = r.tenBp || '';
-                        if (code === 'C2305' || code === 'C1102' || r.entityCode === 'C2305' || r.entityCode === 'C1102') blockSums['Phân Phối THACO AUTO'] += (r.total || 0);
-                        else if (bp.startsWith('B70-A') || tenBp.startsWith('VPĐH')) blockSums['VP Điều Hành (VPĐH)'] += (r.total || 0);
-                        else if (bp.startsWith('B70-C') || tenBp.startsWith('Miền Bắc')) blockSums['Miền Bắc (MB)'] += (r.total || 0);
-                        else if (bp.startsWith('B70-B') || tenBp.startsWith('Miền Nam')) blockSums['Miền Nam (MN)'] += (r.total || 0);
-                        else if (bp.startsWith('B70-D') || tenBp.includes('Chu Lai')) blockSums['Chu Lai (KSX)'] += (r.total || 0);
-                        else blockSums['Dùng chung & Khác'] += (r.total || 0);
-                    });
-                }
-            });
-
-            const labels = Object.keys(blockSums);
-            const vals = labels.map(k => Math.round(blockSums[k] / 1e6));
-            const totalVal = vals.reduce((a, b) => a + b, 0);
-
-            if (activeCharts.deptBlocks) activeCharts.deptBlocks.destroy();
-            if (hasData && totalVal > 0) {
-                activeCharts.deptBlocks = new Chart(ctxDeptBlocks, {
-                    type: 'doughnut',
-                    data: {
-                        labels: labels,
-                        datasets: [{
-                            data: vals,
-                            backgroundColor: ['#00529C', '#0EA5E9', '#0284C7', '#059669', '#D97706', '#64748B']
-                        }]
-                    },
-                    options: {
-                        responsive: true,
-                        maintainAspectRatio: false,
-                        plugins: {
-                            legend: { position: 'right', labels: { font: { size: 10, weight: 'bold' } } },
-                            tooltip: {
-                                callbacks: {
-                                    label: (ctx) => `${ctx.label}: ${ctx.raw.toLocaleString('vi-VN')} Tr.đ (${((ctx.raw / totalVal) * 100).toFixed(1)}%)`
-                                }
-                            }
-                        }
-                    }
-                });
-            }
-        }
-
-        // CHART 6: TOP 10 BỘ PHẬN CÓ CHI PHÍ LỚN NHẤT (HORIZONTAL BAR CHART)
-        const ctxTopDepts = document.getElementById('chart-top-departments');
-        if (ctxTopDepts) {
-            const activeCodes = getActiveEntityCodes();
-            const deptTotals = new Map();
-
-            activeCodes.forEach(code => {
-                if (state.deptData && state.deptData[code]) {
-                    const dRows = state.deptData[code]['2025'] || [];
-                    dRows.forEach(r => {
-                        const key = (r.bp || '') + ' - ' + (r.tenBp || '');
-                        deptTotals.set(key, (deptTotals.get(key) || 0) + (r.total || 0));
-                    });
-                }
-            });
-
-            const topDepts = Array.from(deptTotals.entries())
-                .sort((a, b) => b[1] - a[1])
-                .slice(0, 10);
-
-            const deptLabels = topDepts.map(d => d[0].length > 32 ? d[0].substring(0, 30) + '...' : d[0]);
-            const deptVals = topDepts.map(d => Math.round(d[1] / 1e6));
-
-            if (activeCharts.topDepts) activeCharts.topDepts.destroy();
-            if (topDepts.length > 0) {
-                activeCharts.topDepts = new Chart(ctxTopDepts, {
-                    type: 'bar',
-                    data: {
-                        labels: deptLabels,
-                        datasets: [{
-                            data: deptVals,
-                            backgroundColor: '#00529C',
-                            borderRadius: 4
-                        }]
-                    },
-                    options: {
-                        indexAxis: 'y',
-                        responsive: true,
-                        maintainAspectRatio: false,
-                        plugins: {
-                            legend: { display: false },
-                            tooltip: {
-                                callbacks: {
-                                    label: (ctx) => `${ctx.raw.toLocaleString('vi-VN')} Tr.đ`
-                                }
-                            }
-                        },
-                        scales: {
-                            x: { grid: { color: '#f1f5f9' }, ticks: { font: { size: 9 } } },
-                            y: { grid: { display: false }, ticks: { font: { size: 9 } } }
-                        }
-                    }
-                });
-            }
+        if (window.THACO_DASHBOARD && typeof window.THACO_DASHBOARD.render === 'function') {
+            window.THACO_DASHBOARD.render();
         }
     }
+
 
     // ==========================================
     // 📥 BRAVO EXCEL UPLOAD & CLEANING ENGINE

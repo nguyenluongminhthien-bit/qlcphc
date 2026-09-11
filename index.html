@@ -31,6 +31,14 @@
     <!-- Chart.js CDN for Visual Dashboard -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
+        /* Absolute bring to front for all tooltips */
+        #cost-cell-tooltip,
+        #chart-global-external-tooltip {
+            z-index: 99999999 !important;
+            position: fixed !important;
+            pointer-events: none !important;
+        }
+
         /* Custom scrollbar and light table aesthetics */
         ::-webkit-scrollbar {
             width: 8px;
@@ -534,123 +542,12 @@
             </div>
         </div>
 
-        <!-- Tab 2: Visual Chart Dashboard Section (Light Theme) -->
+        <!-- Tab 2: Visual Chart Dashboard Section (Được quản lý và kết xuất độc lập bởi dashboard.js) -->
         <div id="dashboard-section"
-            class="hidden flex-1 flex flex-col min-h-0 bg-slate-50 border border-slate-200 rounded-xl p-5 overflow-auto shadow-lg space-y-4">
-            <div class="flex items-center justify-between pb-3 border-b border-slate-200">
-                <div>
-                    <h2 class="text-base font-bold text-slate-900 flex items-center gap-2">
-                        📊 Dashboard Phân tích Chi phí Hành chính Trực quan
-                        <span
-                            class="text-xs bg-blue-100 text-[#00529C] px-2 py-0.5 rounded border border-blue-300 font-bold">Chart.js
-                            360°</span>
-                    </h2>
-                    <p class="text-xs text-slate-600 mt-1">
-                        Tự động đồng bộ số liệu tức thời theo các Slicers bộ lọc Miền, Khối, Đơn vị Quản trị và danh
-                        sách Tháng được chọn.
-                    </p>
-                </div>
-                <div
-                    class="text-xs font-bold text-slate-500 bg-white border border-slate-200 px-3 py-1.5 rounded-lg shadow-sm">
-                    Cập nhật: <span class="text-[#00529C]" id="dashboard-update-time">Theo bộ lọc hiện tại</span>
-                </div>
-            </div>
-
-            <!-- Grid 4 Charts -->
-            <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                <!-- Chart Card 1: Cơ cấu theo Khối -->
-                <div
-                    class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm hover:shadow-md transition-all flex flex-col justify-between">
-                    <div class="flex items-center justify-between pb-2 border-b border-slate-100 mb-3">
-                        <h3 class="text-xs font-bold text-[#00529C] uppercase tracking-wider flex items-center gap-1.5">
-                            <span>🍩 Cơ cấu Chi phí theo 4 Khối Quản trị</span>
-                        </h3>
-                        <span class="text-[10px] text-slate-400 font-mono">2026</span>
-                    </div>
-                    <div class="relative h-64 w-full flex items-center justify-center">
-                        <canvas id="chart-block-pie"></canvas>
-                    </div>
-                </div>
-
-                <!-- Chart Card 2: Xu hướng 12 Tháng -->
-                <div
-                    class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm hover:shadow-md transition-all flex flex-col justify-between">
-                    <div class="flex items-center justify-between pb-2 border-b border-slate-100 mb-3">
-                        <h3 class="text-xs font-bold text-[#00529C] uppercase tracking-wider flex items-center gap-1.5">
-                            <span>📈 Diễn biến Chi phí 12 Tháng 2026 (Thực tế vs AI Forecast)</span>
-                        </h3>
-                        <span
-                            class="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded font-bold">T1-T7
-                            Thực tế | T8-T12 AI</span>
-                    </div>
-                    <div class="relative h-64 w-full">
-                        <canvas id="chart-monthly-trend"></canvas>
-                    </div>
-                </div>
-
-                <!-- Chart Card 3: Top Khoản mục Trọng yếu -->
-                <div
-                    class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm hover:shadow-md transition-all flex flex-col justify-between">
-                    <div class="flex items-center justify-between pb-2 border-b border-slate-100 mb-3">
-                        <h3 class="text-xs font-bold text-[#00529C] uppercase tracking-wider flex items-center gap-1.5">
-                            <span>⭐ Top Khoản mục Chi phí Trọng yếu nhất 2026</span>
-                        </h3>
-                        <span
-                            class="text-[10px] text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded font-bold">ĐVT:
-                            Tr.đ</span>
-                    </div>
-                    <div class="relative h-64 w-full">
-                        <canvas id="chart-top-material"></canvas>
-                    </div>
-                </div>
-
-                <!-- Chart Card 4: So sánh YoY 2025 vs 2026 -->
-                <div
-                    class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm hover:shadow-md transition-all flex flex-col justify-between">
-                    <div class="flex items-center justify-between pb-2 border-b border-slate-100 mb-3">
-                        <h3 class="text-xs font-bold text-[#00529C] uppercase tracking-wider flex items-center gap-1.5">
-                            <span>📊 So sánh Chi phí 2025 vs Dự kiến 2026 (Theo Đơn vị Quản trị)</span>
-                        </h3>
-                        <span class="text-[10px] text-slate-500 font-bold">Theo nguyên tắc quản trị</span>
-                    </div>
-                    <div class="relative h-64 w-full">
-                        <canvas id="chart-yoy-comparison"></canvas>
-                    </div>
-                </div>
-
-                <!-- Chart Card 5: Phân bổ Chi phí theo Khối / Bộ phận -->
-                <div
-                    class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm hover:shadow-md transition-all flex flex-col justify-between">
-                    <div class="flex items-center justify-between pb-2 border-b border-slate-100 mb-3">
-                        <h3 class="text-xs font-bold text-[#00529C] uppercase tracking-wider flex items-center gap-1.5">
-                            <span>🏢 Cơ cấu Chi phí theo Khối Phòng Ban (VPĐH / MB / MN / Chu Lai)</span>
-                        </h3>
-                        <span
-                            class="text-[10px] text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded font-bold">ĐVT:
-                            Tr.đ</span>
-                    </div>
-                    <div class="relative h-64 w-full flex items-center justify-center">
-                        <canvas id="chart-dept-blocks"></canvas>
-                    </div>
-                </div>
-
-                <!-- Chart Card 6: Top 10 Bộ phận có Chi phí lớn nhất -->
-                <div
-                    class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm hover:shadow-md transition-all flex flex-col justify-between">
-                    <div class="flex items-center justify-between pb-2 border-b border-slate-100 mb-3">
-                        <h3 class="text-xs font-bold text-[#00529C] uppercase tracking-wider flex items-center gap-1.5">
-                            <span>🏆 Top 10 Bộ phận có Chi phí Hành chính lớn nhất</span>
-                        </h3>
-                        <span
-                            class="text-[10px] text-blue-700 bg-blue-50 border border-blue-200 px-1.5 py-0.5 rounded font-bold">Lũy
-                            kế 2025-2026</span>
-                    </div>
-                    <div class="relative h-64 w-full">
-                        <canvas id="chart-top-departments"></canvas>
-                    </div>
-                </div>
-            </div>
+            class="hidden flex-1 flex flex-col min-h-0 bg-slate-50 border border-slate-200 rounded-xl p-4 overflow-auto shadow-lg space-y-4">
+            <!-- Nội dung Slicers, KPIs, Biểu đồ Full-width và Lưới biểu đồ do dashboard.js kết xuất -->
         </div>
+
 
         <!-- Tab 3: Category Mapping Section (Light Theme) -->
         <div id="mapping-section"
@@ -1502,8 +1399,9 @@ function doPost(e) {
 
     <!-- Scripts -->
     <script src="app_data.js?v=20260908_v21"></script>
-    <script src="tooltip.js?v=20260908_v21"></script>
-    <script src="app.js?v=20260908_v21"></script>
+    <script src="tooltip.js?v=20260911_v10"></script>
+    <script src="dashboard.js?v=20260911_v10"></script>
+    <script src="app.js?v=20260911_v10"></script>
 </body>
 
 </html>
