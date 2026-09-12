@@ -181,7 +181,7 @@
             </span>
             <div>
                 <strong class="font-extrabold text-white">CẢNH BÁO KẾT NỐI:</strong>
-                <span id="gsheet-sync-error-text" class="ml-1 text-rose-100">Không thể kết nối với Google Sheet. Đang hiển thị dữ liệu dự phòng.</span>
+                <span id="gsheet-sync-error-text" class="ml-1 text-rose-100">Không thể kết nối với Database. Đang hiển thị dữ liệu dự phòng.</span>
             </div>
         </div>
         <div class="flex items-center gap-2">
@@ -205,8 +205,8 @@
                 <span class="absolute text-lg">⚡</span>
             </div>
             <div>
-                <h3 class="text-sm font-bold text-slate-900" id="gsheet-loading-title">Đang kết nối Google Sheet</h3>
-                <p class="text-xs text-slate-500 mt-1" id="gsheet-loading-desc">Đang tải dữ liệu thực tế từ Google Sheet...</p>
+                <h3 class="text-sm font-bold text-slate-900" id="gsheet-loading-title">Đang kết nối Database</h3>
+                <p class="text-xs text-slate-500 mt-1" id="gsheet-loading-desc">Đang tải dữ liệu thực tế từ Database...</p>
             </div>
             <span class="text-[10px] text-blue-600 font-mono bg-blue-50 px-2.5 py-1 rounded-full border border-blue-100">
                 Live Sync Engine • THACO AUTO
@@ -855,7 +855,7 @@
                 </div>
             </div>
 
-            <!-- Google Sheet Live Sync Control Bar (THACO AUTO Two-Way Sync) -->
+            <!-- Database Live Sync Control Bar (THACO AUTO Two-Way Sync) -->
             <div
                 class="bg-gradient-to-r from-emerald-50 via-teal-50 to-blue-50 border border-emerald-300/80 rounded-xl p-3.5 mb-3 shadow-sm flex flex-wrap items-center justify-between gap-3">
                 <div class="flex items-center gap-3">
@@ -868,11 +868,11 @@
                     </div>
                     <div>
                         <div class="flex items-center gap-2">
-                            <span class="text-xs font-black text-slate-900">Google Sheet:</span>
+                            <span class="text-xs font-black text-slate-900">Database:</span>
                             <a href="https://docs.google.com/spreadsheets/d/1UwV3TbvAfeLZslEazzcFWi5cXsJo98AQmxX5dXH1Pqo/edit?gid=980279299#gid=980279299"
                                 target="_blank"
                                 class="text-xs font-bold text-[#00529C] hover:underline flex items-center gap-1"
-                                title="Mở trực tiếp file Google Sheet Quan_Ly_Chi_Phi">
+                                title="Mở trực tiếp file Database Quan_Ly_Chi_Phi">
                                 <span>Quan_Ly_Chi_Phi (DM_CPHC)</span>
                                 <svg class="w-3.5 h-3.5 text-blue-700" fill="none" stroke="currentColor"
                                     viewBox="0 0 24 24">
@@ -886,7 +886,7 @@
                             </span>
                         </div>
                         <p class="text-[11px] text-slate-600 mt-0.5" id="gsheet-sync-status-msg">
-                            Đồng bộ 2 chiều tức thì: Thêm, sửa, xóa trên Web App hoặc Google Sheet sẽ tự động đồng bộ
+                            Đồng bộ 2 chiều tức thì: Thêm, sửa, xóa trên Web App hoặc Database sẽ tự động đồng bộ
                             nhau.
                         </p>
                     </div>
@@ -895,22 +895,22 @@
                 <div class="flex items-center gap-2">
                     <button id="btn-sync-from-gsheet"
                         class="px-3 py-1.5 bg-white hover:bg-emerald-50 text-emerald-800 border border-emerald-300 text-xs font-bold rounded-lg shadow-sm transition-all flex items-center gap-1.5"
-                        title="Kéo bản cập nhật mới nhất từ Google Sheet về Web App">
+                        title="Kéo bản cập nhật mới nhất từ Database về Web App">
                         <svg class="w-3.5 h-3.5 text-emerald-600 animate-spin-hover" fill="none" stroke="currentColor"
                             viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                                 d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                         </svg>
-                        <span>🔄 Tải từ Google Sheet</span>
+                        <span>🔄 Tải từ Database</span>
                     </button>
                     <button id="btn-push-to-gsheet"
                         class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg shadow-sm transition-all flex items-center gap-1.5"
-                        title="Đẩy toàn bộ cấu hình danh mục hiện tại lên Google Sheet">
+                        title="Đẩy toàn bộ cấu hình danh mục hiện tại lên Database">
                         <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                                 d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
                         </svg>
-                        <span>⚡ Đẩy lên Google Sheet</span>
+                        <span>⚡ Đẩy lên Database</span>
                     </button>
                     <button id="btn-open-gsheet-config-modal"
                         class="px-3 py-1.5 bg-white hover:bg-slate-100 text-slate-700 text-xs font-semibold rounded-lg border border-slate-300 shadow-sm transition-all flex items-center gap-1"
@@ -971,14 +971,14 @@
                     </h2>
                     <p class="text-xs text-slate-600 mt-1">
                         Cấu hình ma trận liên kết giữa Mã/Tên Đơn vị Quản trị và Mã/Tên Pháp nhân. Tự động đồng bộ với
-                        Google Sheet <code class="text-emerald-700 font-mono">DM_QTPN</code>.
+                        Database <code class="text-emerald-700 font-mono">DM_QTPN</code>.
                     </p>
                 </div>
 
                 <div class="flex flex-wrap items-center gap-2">
                     <button id="btn-sync-qtpn-from-gsheet"
                         class="px-3 py-1.5 bg-white hover:bg-emerald-50 text-emerald-800 border border-emerald-300 text-xs font-bold rounded-lg shadow-sm transition-all flex items-center gap-1.5"
-                        title="Tải bản cập nhật mới nhất từ Google Sheet DM_QTPN">
+                        title="Tải bản cập nhật mới nhất từ Database DM_QTPN">
                         <svg class="w-3.5 h-3.5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                                 d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
@@ -987,7 +987,7 @@
                     </button>
                     <button id="btn-push-qtpn-to-gsheet"
                         class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg shadow-sm transition-all flex items-center gap-1.5"
-                        title="Đẩy dữ liệu ma trận Quản trị ↔ Pháp nhân lên Google Sheet DM_QTPN">
+                        title="Đẩy dữ liệu ma trận Quản trị ↔ Pháp nhân lên Database DM_QTPN">
                         <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                                 d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
@@ -1017,7 +1017,7 @@
                         ở đầu dòng Pháp nhân để kéo thả vào Dòng Mẹ Quản trị khác, hoặc dùng menu <i>Select đổi Quản trị
                             nhanh</i> ở cột Đơn vị Quản trị.</span>
                 </div>
-                <span class="text-[11px] text-blue-700 font-semibold italic">Tự động đồng bộ với Google Sheet
+                <span class="text-[11px] text-blue-700 font-semibold italic">Tự động đồng bộ với Database
                     DM_QTPN</span>
             </div>
 
@@ -1056,7 +1056,7 @@
             </div>
         </div>
 
-        <!-- Tab 3: Google Sheets Sync Section (Light Theme) -->
+        <!-- Tab 3: Databases Sync Section (Light Theme) -->
         <div id="sync-section"
             class="hidden flex-1 flex flex-col min-h-0 bg-white border border-slate-200 rounded-xl p-6 overflow-auto shadow-lg">
             <div class="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-slate-200 mb-5">
@@ -1073,7 +1073,7 @@
                         (Sheet: <span class="text-emerald-700 font-mono">DM_CPHC</span>)
                     </h2>
                     <p class="text-xs text-slate-600 mt-1">
-                        Kết nối tự động giữa Web App và Database Google Sheet. Mọi thao tác thêm, sửa, xóa nhóm và khoản
+                        Kết nối tự động giữa Web App và Database. Mọi thao tác thêm, sửa, xóa nhóm và khoản
                         mục sẽ
                         luôn được cập nhật đồng bộ 2 chiều.
                     </p>
@@ -1086,7 +1086,7 @@
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                                 d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
                         </svg>
-                        Mở Google Sheet DM_CPHC
+                        Mở Database DM_CPHC
                     </a>
                 </div>
             </div>
@@ -1227,7 +1227,7 @@ function doPost(e) {
                     <span>💡 Hướng dẫn triển khai nhanh (1 phút):</span>
                 </h3>
                 <ol class="list-decimal pl-5 space-y-1 text-[11px] text-blue-950">
-                    <li>Mở file Google Sheet <a
+                    <li>Mở file Database <a
                             href="https://docs.google.com/spreadsheets/d/1UwV3TbvAfeLZslEazzcFWi5cXsJo98AQmxX5dXH1Pqo/edit"
                             target="_blank" class="font-bold underline text-[#00529C]">Quan_Ly_Chi_Phi</a>.</li>
                     <li>Vào <strong>Tiện ích mở rộng (Extensions)</strong> &gt; chọn <strong>Apps Script</strong>.</li>
@@ -1397,7 +1397,7 @@ function doPost(e) {
                         </div>
                     </div>
                     <div class="sm:col-span-2">
-                        <label class="block font-bold text-slate-700 mb-1">Đích ghi nhận trên Google Sheet:</label>
+                        <label class="block font-bold text-slate-700 mb-1">Đích ghi nhận trên Database:</label>
                         <select id="select-target-sheet"
                             class="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 font-bold text-slate-800 focus:ring-2 focus:ring-[#00529C]">
                             <option value="CP_AUTO" selected>Sheet CP_AUTO - THACO AUTO (Văn phòng điều hành / Tổng Cty)
@@ -1439,12 +1439,12 @@ function doPost(e) {
                     </div>
                 </div>
 
-                <!-- Google Sheet Sync Option -->
+                <!-- Database Sync Option -->
                 <div class="bg-blue-50 border border-blue-200 rounded-xl p-3 flex items-start gap-2.5">
                     <input type="checkbox" id="chk-sync-to-gsheet" checked
                         class="w-4 h-4 mt-0.5 rounded text-[#00529C] focus:ring-blue-500 border-slate-300">
                     <label for="chk-sync-to-gsheet" class="text-xs text-blue-950 font-medium cursor-pointer">
-                        <strong>Đồng thời đẩy dữ liệu sạch lên Google Sheet</strong> (<span
+                        <strong>Đồng thời đẩy dữ liệu sạch lên Database</strong> (<span
                             id="lbl-target-sheet-preview" class="font-mono font-bold text-[#00529C]">CP_AUTO</span>
                         trong file <span class="font-mono font-bold text-emerald-800">Quan_Ly_Chi_Phi</span>).
                     </label>
@@ -1578,7 +1578,7 @@ function doPost(e) {
         </div>
     </div>
 
-    <!-- Modal Cấu hình Kết nối Google Sheet -->
+    <!-- Modal Cấu hình Kết nối Database -->
     <div id="gsheet-config-modal"
         class="hidden fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
         <div
@@ -1592,7 +1592,7 @@ function doPost(e) {
                                 d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-7 14H6v-2h6v2zm4-4H6v-2h10v2zm0-4H6V7h10v2z" />
                         </svg>
                     </div>
-                    Kết nối Google Sheet Quan_Ly_Chi_Phi (DM_CPHC)
+                    Kết nối Database Quan_Ly_Chi_Phi (DM_CPHC)
                 </h3>
                 <button id="btn-close-gsheet-modal"
                     class="text-slate-400 hover:text-slate-700 text-lg font-bold">✕</button>
@@ -1603,7 +1603,7 @@ function doPost(e) {
                 <div class="bg-emerald-50 border border-emerald-200 rounded-xl p-3 flex items-start gap-2.5">
                     <span class="text-emerald-700 text-base leading-none">📊</span>
                     <div>
-                        <div class="font-bold text-emerald-950">File Google Sheet đích:</div>
+                        <div class="font-bold text-emerald-950">File Database đích:</div>
                         <a href="https://docs.google.com/spreadsheets/d/1UwV3TbvAfeLZslEazzcFWi5cXsJo98AQmxX5dXH1Pqo/edit?gid=980279299#gid=980279299"
                             target="_blank"
                             class="text-blue-700 hover:underline font-mono break-all font-semibold flex items-center gap-1 mt-0.5">
@@ -1625,7 +1625,7 @@ function doPost(e) {
                         placeholder="https://script.google.com/macros/s/.../exec"
                         class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-xs font-mono text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500">
                     <p class="text-[11px] text-slate-500 mt-1">
-                        Dán đường link Web App sinh ra sau khi triển khai Apps Script trong file Google Sheet.
+                        Dán đường link Web App sinh ra sau khi triển khai Apps Script trong file Database.
                     </p>
                 </div>
 
@@ -1639,7 +1639,7 @@ function doPost(e) {
                         placeholder="Nhập khóa API_KEY (Mặc định: THACO_CPHC_2026_SECURE_TOKEN)"
                         class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-xs font-mono text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500">
                     <p class="text-[11px] text-slate-500 mt-1">
-                        Khóa bảo mật quản lý trên Google Sheet &gt; Menu "🚗 THACO AUTO" &gt; "🔐 Kiểm tra / Đổi khóa bảo mật API_KEY".
+                        Khóa bảo mật quản lý trên Database &gt; Menu "🚗 THACO AUTO" &gt; "🔐 Kiểm tra / Đổi khóa bảo mật API_KEY".
                     </p>
                 </div>
 
@@ -1667,7 +1667,7 @@ function doPost(e) {
                     <div id="gsheet-guide-content"
                         class="p-3.5 bg-slate-50 text-[11px] text-slate-600 space-y-2 leading-relaxed border-t border-slate-200">
                         <ol class="list-decimal pl-4 space-y-1">
-                            <li>Mở file Google Sheet <a
+                            <li>Mở file Database <a
                                     href="https://docs.google.com/spreadsheets/d/1UwV3TbvAfeLZslEazzcFWi5cXsJo98AQmxX5dXH1Pqo/edit"
                                     target="_blank" class="text-blue-600 underline font-bold">Quan_Ly_Chi_Phi</a>.</li>
                             <li>Vào menu <strong>Tiện ích mở rộng (Extensions)</strong> &gt; <strong>Apps
