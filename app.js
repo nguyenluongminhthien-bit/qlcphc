@@ -10,7 +10,7 @@
 
     function purgeLegacyCaches() {
         ['THACO_CPHC_STATE_V1', 'THACO_CPHC_USER_DATA_V1', 'THACO_CPHC_USER_DATA_V2'].forEach(k => {
-            try { localStorage.removeItem(k); } catch (e) {}
+            try { localStorage.removeItem(k); } catch (e) { }
         });
     }
 
@@ -22,8 +22,11 @@
         data2024: {},
         data2025: {},
         data2026: {},
-        actualMonths: [1, 2, 3, 4, 5, 6, 7],
-        selectedMonths: [1, 2, 3, 4, 5, 6, 7],
+        selectedYear: 2026,
+        selectedPeriod: 'YTD', // '12M' | 'YTD' | '1'..'12' | custom
+        compareSelection: '3Y_2024_2025_2026', // '3Y_2024_2025_2026' | '2Y_2025_2026' | '2Y_2024_2026' | '2Y_2024_2025'
+        actualMonths: [1, 2, 3, 4, 5, 6],
+        selectedMonths: [1, 2, 3, 4, 5, 6],
         compareConfig: {
             mode: '2025', // '2025' | '2024' | 'BOTH'
             show: true
@@ -231,7 +234,7 @@
                         return parsed[cleanName];
                     }
                 }
-            } catch (e) {}
+            } catch (e) { }
 
             // 2. Tra cứu danh mục mặc định
             if (DEFAULT_GROUP_ICONS[cleanName]) return DEFAULT_GROUP_ICONS[cleanName];
@@ -257,7 +260,7 @@
             state.groupIcons[cleanName] = icon;
             try {
                 localStorage.setItem('THACO_CPHC_GROUP_ICONS', JSON.stringify(state.groupIcons));
-            } catch (e) {}
+            } catch (e) { }
             saveCurrentState();
             refreshAfterIconChange();
         },
@@ -275,7 +278,7 @@
             }
             try {
                 localStorage.setItem('THACO_CPHC_GROUP_ICONS', JSON.stringify(state.groupIcons));
-            } catch (e) {}
+            } catch (e) { }
             saveCurrentState();
             refreshAfterIconChange();
         },
@@ -287,7 +290,7 @@
                 delete state.groupIcons[cleanName];
                 try {
                     localStorage.setItem('THACO_CPHC_GROUP_ICONS', JSON.stringify(state.groupIcons));
-                } catch (e) {}
+                } catch (e) { }
                 saveCurrentState();
                 refreshAfterIconChange();
             }
@@ -298,7 +301,7 @@
         renderTable();
         renderMappingTab();
         if (window.THACO_DASHBOARD && typeof window.THACO_DASHBOARD.init === 'function') {
-            try { window.THACO_DASHBOARD.init(); } catch (e) {}
+            try { window.THACO_DASHBOARD.init(); } catch (e) { }
         }
     }
 
@@ -387,11 +390,10 @@
                 const isSelected = item.icon === iconPickerState.selectedIcon;
                 const btn = document.createElement('button');
                 btn.type = 'button';
-                btn.className = `flex flex-col items-center justify-center p-2 rounded-xl border transition-all cursor-pointer select-none group shadow-2xs ${
-                    isSelected
+                btn.className = `flex flex-col items-center justify-center p-2 rounded-xl border transition-all cursor-pointer select-none group shadow-2xs ${isSelected
                         ? 'border-[#00529C] bg-blue-100/80 ring-2 ring-[#00529C]/50 scale-105'
                         : 'border-slate-200 bg-white hover:border-[#00529C]/60 hover:bg-blue-50/50 hover:scale-105'
-                }`;
+                    }`;
                 btn.title = item.name;
                 btn.innerHTML = `
                     <span class="text-2xl group-hover:scale-110 transition-transform">${item.icon}</span>
@@ -506,7 +508,7 @@
         renderMappingTab();
         renderTable();
         if (window.THACO_DASHBOARD && typeof window.THACO_DASHBOARD.init === 'function') {
-            try { window.THACO_DASHBOARD.init(); } catch (err) {}
+            try { window.THACO_DASHBOARD.init(); } catch (err) { }
         }
     }
 
@@ -773,8 +775,8 @@
                     if (!state.data2025[code]['642']) state.data2025[code]['642'] = {};
                     state.data2025[code]['642'][catIdStr] = m25;
 
-                    // 2026
-                    const m26 = seasonal.map(s => Math.round(base * 1.08 * s * 1e6));
+                    // 2026 (T1 - T6 là thực tế, T7 - T12 để 0 để AI dự báo)
+                    const m26 = seasonal.map((s, mIdx) => (mIdx < 6 ? Math.round(base * 1.08 * s * 1e6) : 0));
                     const tot26 = m26.reduce((a, b) => a + b, 0);
                     state.deptData[code]['2026'].push({
                         stt: idx + 1,
@@ -789,7 +791,7 @@
                         tenBp: tenBp,
                         khoiPb: khoiPb,
                         year: 2026,
-                        ky: 'T1 - T7',
+                        ky: 'T1 - T6',
                         months: m26,
                         total: tot26,
                         catId: catId
@@ -799,6 +801,7 @@
                 });
             });
 
+            detectActualMonthsFromData();
             saveCurrentState();
         }
     }
@@ -831,24 +834,30 @@
         ensureBaselineData();
         ensureBaselineCbnvData();
 
+        // 3b. Nhận diện động ranh giới tháng thực tế theo dữ liệu thật & Thiết lập mặc định Lũy kế thực tế
+        const detectedActual = detectActualMonthsFromData();
+        if (!state.selectedMonths || state.selectedMonths.length === 0 || isActualYtdMode() || (Array.isArray(state.selectedMonths) && state.selectedMonths.length === 7 && state.selectedMonths.includes(7) && !detectedActual.includes(7))) {
+            state.selectedMonths = [...detectedActual];
+            state.selectedPeriod = 'YTD';
+        }
+
         setupEventListeners();
-        setupMonthPicker();
-        setupYearPicker();
-        updateYearPickerUI();
+        initUnifiedReportControls();
+        updateReportViewModeUI();
         populateSlicers();
         ensureQtpnMappings();
 
-        // 4. Khởi tạo và liên kết đồng bộ 2 chiều với Database
+        // 4. Khởi tạo và liên kết đồng bộ 2 chiều với Google Sheet
         updateGoogleSheetSyncUI();
         const config = getGoogleSheetSyncConfig();
 
         if (config.webAppUrl && config.webAppUrl.trim() !== '' && config.autoSync !== false) {
             if (hasUrlConfig) {
                 // Hiển thị overlay tải dữ liệu để người dùng không nhìn thấy dữ liệu demo chớp sáng
-                showLoadingOverlay('Đang kết nối và tải dữ liệu thực tế từ Database...');
+                showLoadingOverlay('Đang kết nối và tải dữ liệu thực tế từ Google Sheet...');
             }
             try {
-                console.log('Tự động kiểm tra cập nhật mới nhất từ Database...');
+                console.log('Tự động kiểm tra cập nhật mới nhất từ Google Sheet...');
                 await syncFromGoogleSheet(false);
             } finally {
                 if (hasUrlConfig) {
@@ -884,6 +893,9 @@
                 qtpnMappings: state.qtpnMappings,
                 deptData: state.deptData,
                 data2026: state.data2026,
+                selectedYear: state.selectedYear,
+                selectedPeriod: state.selectedPeriod,
+                compareSelection: state.compareSelection,
                 actualMonths: state.actualMonths,
                 selectedMonths: state.selectedMonths,
                 data2024: state.data2024,
@@ -913,14 +925,14 @@
                         state.groupIcons = Object.assign({}, parsed, state.groupIcons || {});
                     }
                 }
-            } catch (err) {}
+            } catch (err) { }
 
             const raw = localStorage.getItem(STORAGE_KEY);
             if (raw) {
                 const saved = JSON.parse(raw);
                 // Kiểm tra nếu cache còn chứa các mã giả cũ (C1001, N1309...) thì tự động xoá
                 const hasLegacy = (saved.entities || []).some(e => ['C1001', 'N1309', 'N1308', 'C1102'].includes(e.code)) ||
-                                  Object.keys(saved.data2025 || {}).some(k => ['C1001', 'N1309', 'C1102'].includes(k));
+                    Object.keys(saved.data2025 || {}).some(k => ['C1001', 'N1309', 'C1102'].includes(k));
                 if (hasLegacy) {
                     console.warn('Phát hiện dữ liệu mẫu cũ trong LocalStorage. Đang tự động làm sạch...');
                     localStorage.removeItem(STORAGE_KEY);
@@ -941,6 +953,15 @@
                 }
                 if (saved.data2026) {
                     state.data2026 = saved.data2026;
+                }
+                if (saved.selectedYear) {
+                    state.selectedYear = saved.selectedYear;
+                }
+                if (saved.selectedPeriod) {
+                    state.selectedPeriod = saved.selectedPeriod;
+                }
+                if (saved.compareSelection) {
+                    state.compareSelection = saved.compareSelection;
                 }
                 if (saved.actualMonths && Array.isArray(saved.actualMonths)) {
                     state.actualMonths = saved.actualMonths;
@@ -973,7 +994,7 @@
                     state.cbnvAudit = saved.cbnvAudit;
                 }
                 ensureCategoryMaterialFlags();
-                console.log('Đã nạp dữ liệu từ bộ nhớ đệm Database Live V3.');
+                console.log('Đã nạp dữ liệu từ bộ nhớ đệm Google Sheet Live V3.');
             }
         } catch (e) {
             console.error('Không thể nạp dữ liệu từ LocalStorage:', e);
@@ -981,13 +1002,13 @@
     }
 
     function resetToBaseline() {
-        if (!confirm('Anh/Chị có chắc chắn muốn XÓA TOÀN BỘ bộ nhớ tạm trình duyệt và tải lại mới từ Database?')) {
+        if (!confirm('Anh/Chị có chắc chắn muốn XÓA TOÀN BỘ bộ nhớ tạm trình duyệt và tải lại mới từ Google Sheet?')) {
             return;
         }
 
         try {
             localStorage.removeItem(STORAGE_KEY);
-            try { localStorage.removeItem('THACO_CPHC_GROUP_ICONS'); } catch (err) {}
+            try { localStorage.removeItem('THACO_CPHC_GROUP_ICONS'); } catch (err) { }
             purgeLegacyCaches();
 
             state.groupIcons = {};
@@ -996,8 +1017,9 @@
             state.data2025 = JSON.parse(JSON.stringify(THACO_APP_DATA.data2025 || {}));
             state.data2026 = JSON.parse(JSON.stringify(THACO_APP_DATA.data2026 || {}));
             state.deptData = JSON.parse(JSON.stringify(THACO_APP_DATA.deptData || {}));
-            state.actualMonths = [1, 2, 3, 4, 5, 6, 7];
-            state.selectedMonths = [1, 2, 3, 4, 5, 6, 7];
+            state.actualMonths = [1, 2, 3, 4, 5, 6];
+            state.selectedMonths = [1, 2, 3, 4, 5, 6];
+            state.selectedPeriod = 'YTD';
             state.cbnvConfig = { displayMode: 'BOTH' };
             state.cbnvData = {};
             ensureBaselineCbnvData();
@@ -1009,7 +1031,7 @@
             renderAll();
 
             syncFromGoogleSheet(false);
-            alert('Đã xóa sạch bộ nhớ tạm và đang đồng bộ lại từ Database!');
+            alert('Đã xóa sạch bộ nhớ tạm và đang đồng bộ lại từ Google Sheet!');
         } catch (e) {
             alert('Có lỗi khi reset dữ liệu: ' + e.message);
         }
@@ -1034,11 +1056,11 @@
     }
 
     // ==========================================
-    // 🌐 DatabaseS TWO-WAY SYNC ENGINE
+    // 🌐 GOOGLE SHEETS TWO-WAY SYNC ENGINE
     // ==========================================
 
     const GSHEET_CONFIG_KEY = 'THACO_CPHC_GSHEET_SYNC_CONFIG_V1';
-    const APPS_SCRIPT_SOURCE_CODE = "/**\n * =========================================================================================\n * GOOGLE APPS SCRIPT: HỆ THỐNG QUẢN TRỊ CHI PHÍ HÀNH CHÍNH - THACO AUTO\n * File Database: Quan_Ly_Chi_Phi\n * (ID: 1UwV3TbvAfeLZslEazzcFWi5cXsJo98AQmxX5dXH1Pqo)\n * \n * Các Sheet quản lý:\n * 1. DM_CPHC : Cấu hình danh mục phí, mã B7, mã B10, Nhóm phí, Trọng yếu (⭐)\n * 2. DM_QTPN : Danh mục ánh xạ Quản trị ↔ Pháp nhân (TT, Mã QT, Tên QT, Mã PN, Tên PN)\n * 3. CP_AUTO : Toàn bộ dữ liệu chi phí hành chính THACO AUTO (C1101 - VPĐH)\n * 4. CP_PP   : Dữ liệu chi phí hành chính Phân Phối THACO AUTO\n * 5. CP_CTTT : Dữ liệu chi phí hành chính các Công ty Tỉnh Thành / Chi nhánh\n * =========================================================================================\n * \n * HƯỚNG DẪN TRIỂN KHAI / CẬP NHẬT (MẤT 1 PHÚT):\n * 1. Mở file Database Quan_Ly_Chi_Phi trên trình duyệt:\n *    https://docs.google.com/spreadsheets/d/1UwV3TbvAfeLZslEazzcFWi5cXsJo98AQmxX5dXH1Pqo/edit\n * 2. Vào menu \"Tiện ích mở rộng\" (Extensions) > chọn \"Apps Script\".\n * 3. Dán toàn bộ mã nguồn này đè vào file Code.gs và bấm Ctrl + S (Lưu).\n * 4. Bấm \"Triển khai\" (Deploy) > \"Quản lý bản triển khai\" (Manage deployments) hoặc \"Triển khai mới\" (New deployment).\n * 5. Chọn loại \"Ứng dụng web\" (Web app):\n *    - Thực thi dưới dạng (Execute as): \"Tôi\" (Me)\n *    - Ai có quyền truy cập (Who has access): \"Bất kỳ ai\" (Anyone)\n * 6. Bấm \"Triển khai\" (Deploy) > Sao chép \"URL ứng dụng web\" dán vào Web App.\n * =========================================================================================\n */\n\nvar SHEET_DM_CPHC = 'DM_CPHC';\nvar SHEET_DM_QTPN = 'DM_QTPN';\nvar SHEET_DM_CBNV = 'DM_CBNV';\nvar COST_SHEETS = ['CP_AUTO', 'CP_PP', 'CP_CTTT', 'CP_VPDH', 'CP_NHAMAY', 'CP_CTTT_MB', 'CP_CTTT_MN'];\n\nvar CBNV_COLUMNS = [\n  'STT',\n  'Khối Đơn Vị',\n  'Mã Quản trị',\n  'Tên Quản trị',\n  'Mã ĐVCS',\n  'Tên Pháp Nhân / Showroom',\n  'Năm',\n  'Tháng',\n  'Định Biên (Người)',\n  'Thực Tế (Người)',\n  'Ghi Chú'\n];\n\nvar SCRIPT_PROP_API_KEY = 'API_KEY';\nvar DEFAULT_SEED_API_KEY = 'THACO_CPHC_2026_SECURE_TOKEN';\n\n/**\n * Lấy khóa API_KEY từ Script Properties, tự động khởi tạo nếu chưa có\n */\nfunction getOrInitApiKey() {\n  var props = PropertiesService.getScriptProperties();\n  var key = props.getProperty(SCRIPT_PROP_API_KEY);\n  if (!key) {\n    key = DEFAULT_SEED_API_KEY;\n    props.setProperty(SCRIPT_PROP_API_KEY, key);\n  }\n  return key;\n}\n\n/**\n * Kiểm tra tính hợp lệ của API_KEY trong request GET hoặc POST\n */\nfunction checkApiKey(e, payload) {\n  var configuredKey = getOrInitApiKey();\n  var providedKey = '';\n\n  if (e && e.parameter) {\n    providedKey = e.parameter.api_key || e.parameter.apiKey || e.parameter.key || '';\n  }\n  if (!providedKey && payload) {\n    providedKey = payload.api_key || payload.apiKey || payload.key || '';\n  }\n\n  return Boolean(providedKey && String(providedKey).trim() === String(configuredKey).trim());\n}\n\nvar COST_COLUMNS = [\n  'STT',\n  'Mã ĐVCS',\n  'Tên Pháp Nhân / Đơn Vị',\n  'Mã B7',\n  'Tên Khoản Mục (B7)',\n  'Nhóm Chi Phí',\n  'Mã B10',\n  'Trọng Yếu (⭐)',\n  'Mã Bộ Phận',\n  'Tên Bộ Phận',\n  'Khối Phòng Ban',\n  'Năm',\n  'Kỳ Thực Hiện',\n  'T01', 'T02', 'T03', 'T04', 'T05', 'T06',\n  'T07', 'T08', 'T09', 'T10', 'T11', 'T12',\n  'Tổng Cộng'\n];\n\n/**\n * Tạo menu THACO AUTO trong Database\n */\nfunction onOpen() {\n  SpreadsheetApp.getUi()\n    .createMenu('🚗 THACO AUTO')\n    .addItem('🔐 Kiểm tra / Đổi khóa bảo mật API_KEY', 'manageApiKeyMenu')\n    .addSeparator()\n    .addItem('🔄 Kiểm tra cấu trúc DM_CPHC', 'checkDmStructure')\n    .addItem('✨ Chuẩn hóa định dạng DM_CPHC', 'formatDmSheet')\n    .addSeparator()\n    .addItem('🔄 Kiểm tra cấu trúc DM_QTPN', 'checkDmQtpnStructure')\n    .addItem('✨ Chuẩn hóa định dạng DM_QTPN', 'formatDmQtpnSheet')\n    .addSeparator()\n    .addItem('🔄 Kiểm tra cấu trúc DM_CBNV', 'checkDmCbnvStructure')\n    .addItem('✨ Chuẩn hóa định dạng DM_CBNV', 'formatDmCbnvSheet')\n    .addSeparator()\n    .addItem('📊 Khởi tạo cấu trúc các Sheet Chi phí (CP_AUTO, CP_PP, CP_CTTT)', 'initCostSheets')\n    .addItem('✨ Chuẩn hóa định dạng các Sheet Chi phí', 'formatAllCostSheets')\n    .addToUi();\n}\n\n/**\n * Hàm quản trị khóa API_KEY trực tiếp từ Menu Database\n */\nfunction manageApiKeyMenu() {\n  var ui = SpreadsheetApp.getUi();\n  var currentKey = getOrInitApiKey();\n\n  var res = ui.prompt(\n    '🔐 QUẢN TRỊ KHÓA BẢO MẬT API_KEY (THACO AUTO)',\n    'Khóa API_KEY hiện tại:\\n' + currentKey + '\\n\\nNhập khóa API_KEY mới (hoặc bấm Hủy để giữ nguyên):',\n    ui.ButtonSet.OK_CANCEL\n  );\n\n  if (res.getSelectedButton() === ui.Button.OK) {\n    var newKey = res.getResponseText().trim();\n    if (!newKey) {\n      ui.alert('⚠️ Khóa API_KEY không được để trống.');\n      return;\n    }\n    PropertiesService.getScriptProperties().setProperty(SCRIPT_PROP_API_KEY, newKey);\n    ui.alert('✅ Đã cập nhật khóa API_KEY thành công!\\n\\nKhóa mới: ' + newKey + '\\n\\nVui lòng cập nhật khóa này vào Web App trong mục \"Cài đặt kết nối\".');\n  }\n}\n\n/**\n * =========================================================================================\n * API GET: Đọc dữ liệu từ Database về Web App\n * Hỗ trợ các chế độ:\n * 1. Mặc định hoặc ?action=get_all : Đọc TOÀN BỘ (DM_CPHC, DM_QTPN và CP_AUTO, CP_PP, CP_CTTT)\n * 2. ?action=get_dm               : Chỉ đọc danh mục DM_CPHC\n * 3. ?action=get_qtpn             : Chỉ đọc danh mục DM_QTPN\n * 4. ?action=get_cphc_data&sheet=CP_AUTO : Chỉ đọc dữ liệu của 1 sheet chi phí cụ thể\n * 5. ?action=test_key             : Kiểm tra xác thực khóa API_KEY\n * =========================================================================================\n */\nfunction doGet(e) {\n  try {\n    var params = e ? e.parameter || {} : {};\n\n    // 🔒 LỚP BẢO MẬT: Kiểm tra API_KEY trước khi xử lý bất kỳ yêu cầu nào\n    if (!checkApiKey(e, null)) {\n      return jsonResponse({\n        status: 'error',\n        code: 401,\n        message: 'Từ chối truy cập: Khóa API_KEY không hợp lệ hoặc chưa được cung cấp. Vui lòng kiểm tra lại cấu hình kết nối trên Web App.'\n      });\n    }\n\n    var action = params.action || 'get_all';\n    var sheetName = params.sheet || '';\n\n    // Kiểm tra kết nối nhanh (Ping/Test key)\n    if (action === 'test_key' || action === 'ping') {\n      return jsonResponse({\n        status: 'success',\n        message: 'Xác thực API_KEY thành công! Kết nối bảo mật hoạt động chuẩn xác.',\n        authenticated: true,\n        timestamp: new Date().toISOString()\n      });\n    }\n\n    // Trường hợp 1: Đọc riêng 1 sheet chi phí\n    if (action === 'get_cphc_data' && sheetName) {\n      return handleGetCostData(sheetName);\n    }\n\n    // Trường hợp 2: Đọc riêng Danh mục DM_CPHC\n    if (action === 'get_dm') {\n      return handleGetDmCphc();\n    }\n\n    // Trường hợp 3: Đọc riêng Danh mục DM_QTPN\n    if (action === 'get_qtpn') {\n      return handleGetDmQtpn();\n    }\n\n    // Trường hợp 4: Đọc riêng Danh mục Định biên / Nhân sự DM_CBNV\n    if (action === 'get_cbnv') {\n      return handleGetDmCbnv();\n    }\n\n    // Trường hợp 5: Mặc định (action === 'get_all' hoặc không truyền tham số):\n    return handleGetAllData();\n\n  } catch (err) {\n    return jsonResponse({\n      status: 'error',\n      message: 'Lỗi doGet: ' + err.toString()\n    });\n  }\n}\n\n/**\n * =========================================================================================\n * API POST: Nhận dữ liệu từ Web App ghi vào Database\n * Hỗ trợ các chế độ:\n * 1. Ghi chi phí đã làm sạch: payload.action === 'save_cphc_data'\n * 2. Ghi danh mục Quản trị ↔ Pháp nhân: payload.action === 'save_qtpn' hoặc payload.qtpnMappings\n * 3. Ghi danh mục Định biên / Nhân sự: payload.action === 'save_cbnv' hoặc payload.cbnvData\n * 4. Ghi danh mục DM_CPHC: payload.action === 'save_dm' hoặc payload.categories\n * =========================================================================================\n */\nfunction doPost(e) {\n  try {\n    var raw = e.postData && e.postData.contents ? e.postData.contents : '';\n    if (!raw) {\n      return jsonResponse({ status: 'error', message: 'Dữ liệu POST rỗng.' });\n    }\n\n    var payload = JSON.parse(raw);\n\n    // 🔒 LỚP BẢO MẬT: Kiểm tra API_KEY trước khi thực hiện bất kỳ thao tác ghi/xóa nào\n    if (!checkApiKey(e, payload)) {\n      return jsonResponse({\n        status: 'error',\n        code: 401,\n        message: 'Từ chối truy cập: Khóa API_KEY không hợp lệ hoặc chưa được cung cấp. Thao tác ghi dữ liệu bị chặn.'\n      });\n    }\n\n    // Trường hợp 1: Ghi dữ liệu chi phí đã làm sạch từ Bravo (CP_AUTO / CP_PP / CP_CTTT)\n    if (payload.action === 'save_cphc_data') {\n      return handleSaveCostData(payload);\n    }\n\n    // Trường hợp 2: Ghi danh mục Quản trị ↔ Pháp nhân DM_QTPN\n    if (payload.action === 'save_qtpn' || payload.qtpnMappings) {\n      return handleSaveDmQtpn(payload);\n    }\n\n    // Trường hợp 3: Ghi danh mục Định biên / Nhân sự DM_CBNV\n    if (payload.action === 'save_cbnv' || payload.cbnvData) {\n      return handleSaveDmCbnv(payload);\n    }\n\n    // Trường hợp 4: Ghi danh mục DM_CPHC\n    return handleSaveDmCphc(payload);\n\n  } catch (err) {\n    return jsonResponse({\n      status: 'error',\n      message: 'Lỗi doPost: ' + err.toString()\n    });\n  }\n}\n\n/**\n * =========================================================================================\n * XỬ LÝ LẤY TOÀN BỘ DỮ LIỆU (GET_ALL)\n * =========================================================================================\n */\nfunction handleGetAllData() {\n  var ss = SpreadsheetApp.getActiveSpreadsheet();\n\n  // 1. Đọc Danh mục DM_CPHC\n  var categories = readDmCategories(ss);\n\n  // 2. Đọc Danh mục DM_QTPN\n  var qtpnMappings = readDmQtpn(ss);\n\n  // 3. Đọc Danh mục Định biên / Nhân sự DM_CBNV\n  var cbnvData = readDmCbnv(ss);\n\n  // 4. Đọc các sheet chi phí\n  var costSheets = {};\n  var allCostRows = [];\n\n  COST_SHEETS.forEach(function(sName) {\n    var sRows = readSheetCostRows(ss, sName);\n    costSheets[sName] = sRows;\n    allCostRows = allCostRows.concat(sRows);\n  });\n\n  return jsonResponse({\n    status: 'success',\n    updatedAt: new Date().toISOString(),\n    categories: categories,\n    qtpnMappings: qtpnMappings,\n    cbnvData: cbnvData,\n    costSheets: costSheets,\n    allCostRows: allCostRows,\n    totalCostRows: allCostRows.length\n  });\n}\n\n/**\n * Đọc toàn bộ danh mục từ sheet DM_CPHC\n */\nfunction readDmCategories(ss) {\n  var sheet = ss.getSheetByName(SHEET_DM_CPHC);\n  if (!sheet || sheet.getLastRow() <= 1) return [];\n\n  var data = sheet.getDataRange().getValues();\n  if (data.length <= 1) return [];\n\n  var headers = data[0];\n  var colMap = { tt: -1, group: -1, b7: -1, b10: -1, name: -1, isMaterial: -1 };\n\n  for (var c = 0; c < headers.length; c++) {\n    var h = String(headers[c] || '').toLowerCase().trim();\n    if (h.indexOf('tt') !== -1 || h.indexOf('stt') !== -1) colMap.tt = c;\n    else if (h.indexOf('nhóm') !== -1 || h.indexOf('group') !== -1) colMap.group = c;\n    else if (h.indexOf('b7') !== -1) colMap.b7 = c;\n    else if (h.indexOf('b10') !== -1) colMap.b10 = c;\n    else if (h.indexOf('tên') !== -1 || h.indexOf('khoản mục') !== -1 || h.indexOf('diễn giải') !== -1) colMap.name = c;\n    else if (h.indexOf('trọng yếu') !== -1 || h.indexOf('material') !== -1 || h.indexOf('⭐') !== -1) colMap.isMaterial = c;\n  }\n\n  if (colMap.tt === -1) colMap.tt = 0;\n  if (colMap.group === -1) colMap.group = 1;\n  if (colMap.b7 === -1) colMap.b7 = 2;\n  if (colMap.b10 === -1) colMap.b10 = 3;\n  if (colMap.name === -1) colMap.name = 4;\n  if (colMap.isMaterial === -1) colMap.isMaterial = 5;\n\n  var categories = [];\n  var currentGroup = 'Chi phí hoạt động chung';\n\n  for (var r = 1; r < data.length; r++) {\n    var row = data[r];\n    if (!row || row.every(function(cell) { return cell === '' || cell === null; })) continue;\n\n    var nameVal = String(row[colMap.name] || '').trim();\n    var b7Val = String(row[colMap.b7] || '').trim();\n    var b10Val = String(row[colMap.b10] || '').trim();\n    var grpVal = String(row[colMap.group] || '').trim();\n    var ttVal = parseInt(row[colMap.tt], 10) || (categories.length + 1);\n\n    var isMat = false;\n    if (colMap.isMaterial !== -1 && row[colMap.isMaterial]) {\n      var mStr = String(row[colMap.isMaterial]).toLowerCase().trim();\n      isMat = (mStr === 'true' || mStr === '1' || mStr === 'x' || mStr === '⭐' || mStr === 'có');\n    }\n\n    if (grpVal) currentGroup = grpVal;\n    if (!b7Val && !b10Val && !nameVal) continue;\n\n    var b7Codes = b7Val ? b7Val.split(/[,;\\s]+/).map(function(s){ return s.trim(); }).filter(Boolean) : [];\n    var b10Codes = b10Val ? b10Val.split(/[,;\\s]+/).map(function(s){ return s.trim(); }).filter(Boolean) : [];\n\n    categories.push({\n      id: r,\n      tt: ttVal,\n      group: currentGroup,\n      b7_display: b7Val,\n      b10_display: b10Val,\n      b7_codes: b7Codes,\n      b10_codes: b10Codes,\n      name: nameVal || b7Val || ('Khoản mục ' + r),\n      is_material: isMat\n    });\n  }\n\n  return categories;\n}\n\n/**\n * Đọc toàn bộ dòng chi phí từ một sheet chi phí cụ thể\n */\nfunction readSheetCostRows(ss, sheetName) {\n  var sheet = ss.getSheetByName(sheetName);\n  if (!sheet || sheet.getLastRow() <= 1) return [];\n\n  var data = sheet.getDataRange().getValues();\n  if (data.length <= 1) return [];\n\n  var headers = data[0];\n  var rows = [];\n\n  for (var r = 1; r < data.length; r++) {\n    var raw = data[r];\n    if (!raw || raw.every(function(c) { return c === '' || c === null; })) continue;\n\n    var item = {};\n    for (var c = 0; c < headers.length; c++) {\n      item[headers[c]] = raw[c];\n    }\n    rows.push(item);\n  }\n\n  return rows;\n}\n\n/**\n * =========================================================================================\n * XỬ LÝ DANH MỤC PHÍ (DM_CPHC)\n * =========================================================================================\n */\nfunction handleGetDmCphc() {\n  var ss = SpreadsheetApp.getActiveSpreadsheet();\n  var categories = readDmCategories(ss);\n\n  return jsonResponse({\n    status: 'success',\n    sheet: SHEET_DM_CPHC,\n    count: categories.length,\n    updatedAt: new Date().toISOString(),\n    categories: categories\n  });\n}\n\nfunction handleSaveDmCphc(payload) {\n  var categories = payload.categories;\n  if (!categories || !Array.isArray(categories)) {\n    return jsonResponse({ status: 'error', message: 'Mảng categories không đúng định dạng.' });\n  }\n\n  var ss = SpreadsheetApp.getActiveSpreadsheet();\n  var sheet = ss.getSheetByName(SHEET_DM_CPHC);\n  if (!sheet) {\n    sheet = ss.insertSheet(SHEET_DM_CPHC);\n  }\n\n  sheet.clear();\n\n  var headerRow = [\n    'TT',\n    'Nhóm Chi Phí',\n    'Mã Bravo 7',\n    'Mã Bravo 10',\n    'Tên Khoản Mục / Diễn Giải',\n    'Trọng yếu (⭐)'\n  ];\n\n  var rows = [headerRow];\n  categories.forEach(function(cat, index) {\n    var b7Text = cat.b7_display || (cat.b7_codes ? cat.b7_codes.join(', ') : '');\n    var b10Text = cat.b10_display || (cat.b10_codes ? cat.b10_codes.join(', ') : '');\n    var tt = cat.tt || (index + 1);\n    var grp = cat.group || 'Chi phí hoạt động chung';\n    var name = cat.name || '';\n    var mat = cat.is_material ? '⭐' : '';\n    rows.push([tt, grp, b7Text, b10Text, name, mat]);\n  });\n\n  sheet.getRange(1, 1, rows.length, 6).setValues(rows);\n\n  var headerRange = sheet.getRange(1, 1, 1, 6);\n  headerRange.setBackground('#00529C')\n             .setFontColor('#FFFFFF')\n             .setFontWeight('bold')\n             .setHorizontalAlignment('center')\n             .setVerticalAlignment('middle');\n  sheet.setRowHeight(1, 35);\n\n  if (rows.length > 1) {\n    sheet.getRange(2, 1, rows.length - 1, 1).setHorizontalAlignment('center');\n    sheet.getRange(2, 3, rows.length - 1, 2).setHorizontalAlignment('center');\n    sheet.getRange(2, 6, rows.length - 1, 1).setHorizontalAlignment('center');\n  }\n\n  sheet.setFrozenRows(1);\n  sheet.autoResizeColumns(1, 6);\n\n  return jsonResponse({\n    status: 'success',\n    message: 'Đã đồng bộ thành công ' + categories.length + ' khoản mục lên Database DM_CPHC!',\n    count: categories.length,\n    updatedAt: new Date().toISOString()\n  });\n}\n\n/**\n * =========================================================================================\n * XỬ LÝ QUẢN TRỊ ↔ PHÁP NHÂN (DM_QTPN)\n * =========================================================================================\n */\nfunction handleGetDmQtpn() {\n  var ss = SpreadsheetApp.getActiveSpreadsheet();\n  var mappings = readDmQtpn(ss);\n\n  return jsonResponse({\n    status: 'success',\n    sheet: SHEET_DM_QTPN,\n    count: mappings.length,\n    updatedAt: new Date().toISOString(),\n    qtpnMappings: mappings\n  });\n}\n\nfunction readDmQtpn(ss) {\n  var sheet = ss.getSheetByName(SHEET_DM_QTPN);\n  if (!sheet || sheet.getLastRow() <= 1) return [];\n\n  var data = sheet.getDataRange().getValues();\n  if (data.length <= 1) return [];\n\n  var headers = data[0].map(function(h) { return String(h || '').trim().toLowerCase(); });\n  var colMap = { tt: 0, khoi: -1, maQt: -1, tenQt: -1, maPn: -1, tenPn: -1 };\n\n  for (var c = 0; c < headers.length; c++) {\n    var h = headers[c];\n    if (h.indexOf('khối') !== -1 || h.indexOf('khoi') !== -1 || h.indexOf('đơn vị') !== -1 && h.indexOf('quản trị') === -1) colMap.khoi = c;\n    else if (h.indexOf('mã quản trị') !== -1 || h.indexOf('ma quan tri') !== -1 || h.indexOf('mã qt') !== -1) colMap.maQt = c;\n    else if (h.indexOf('tên quản trị') !== -1 || h.indexOf('ten quan tri') !== -1 || h.indexOf('đơn vị quản trị') !== -1 || h.indexOf('tên qt') !== -1) colMap.tenQt = c;\n    else if (h.indexOf('mã pháp nhân') !== -1 || h.indexOf('ma phap nhan') !== -1 || h.indexOf('mã đvcs') !== -1 || h.indexOf('mã pn') !== -1) colMap.maPn = c;\n    else if (h.indexOf('tên pháp nhân') !== -1 || h.indexOf('ten phap nhan') !== -1 || h.indexOf('tên đvcs') !== -1 || h.indexOf('tên pn') !== -1 || h.indexOf('showroom') !== -1) colMap.tenPn = c;\n  }\n\n  // Fallback nếu không khớp từ khóa\n  var is6Cols = data[0].length >= 6;\n  if (colMap.khoi === -1) colMap.khoi = is6Cols ? 1 : -1;\n  if (colMap.maQt === -1) colMap.maQt = is6Cols ? 2 : 1;\n  if (colMap.tenQt === -1) colMap.tenQt = is6Cols ? 3 : 2;\n  if (colMap.maPn === -1) colMap.maPn = is6Cols ? 4 : 3;\n  if (colMap.tenPn === -1) colMap.tenPn = is6Cols ? 5 : 4;\n\n  var mappings = [];\n  for (var r = 1; r < data.length; r++) {\n    var row = data[r];\n    if (!row || row.every(function(cell) { return cell === '' || cell === null; })) continue;\n\n    var khoi = colMap.khoi !== -1 ? String(row[colMap.khoi] || '').trim() : 'VPĐH';\n    var maQt = String(row[colMap.maQt] || '').trim();\n    var tenQt = String(row[colMap.tenQt] || '').trim();\n    var maPn = String(row[colMap.maPn] || '').trim();\n    var tenPn = String(row[colMap.tenPn] || '').trim();\n\n    if (!maQt && !tenQt && !maPn && !tenPn) continue;\n\n    mappings.push({\n      stt: parseInt(row[colMap.tt], 10) || (mappings.length + 1),\n      khoi: khoi || 'VPĐH',\n      maQt: maQt,\n      tenQt: tenQt,\n      maPn: maPn,\n      tenPn: tenPn\n    });\n  }\n\n  return mappings;\n}\n\nfunction handleSaveDmQtpn(payload) {\n  var mappings = payload.qtpnMappings || payload.mappings;\n  if (!mappings || !Array.isArray(mappings)) {\n    return jsonResponse({ status: 'error', message: 'Mảng qtpnMappings không đúng định dạng.' });\n  }\n\n  var ss = SpreadsheetApp.getActiveSpreadsheet();\n  var sheet = ss.getSheetByName(SHEET_DM_QTPN);\n  if (!sheet) {\n    sheet = ss.insertSheet(SHEET_DM_QTPN);\n  }\n\n  sheet.clear();\n\n  var headerRow = [\n    'TT',\n    'Khối Đơn Vị',\n    'Mã Quản trị',\n    'Tên Quản trị',\n    'Mã pháp nhân',\n    'Tên pháp nhân'\n  ];\n\n  var rows = [headerRow];\n  mappings.forEach(function(item, index) {\n    var tt = item.stt || (index + 1);\n    var khoi = item.khoi || 'VPĐH';\n    var maQt = item.maQt || item.maQuanti || '';\n    var tenQt = item.tenQt || item.tenQuanti || '';\n    var maPn = item.maPn || item.maPhapNhan || '';\n    var tenPn = item.tenPn || item.tenPhapNhan || '';\n    rows.push([tt, khoi, maQt, tenQt, maPn, tenPn]);\n  });\n\n  sheet.getRange(1, 1, rows.length, 6).setValues(rows);\n\n  var headerRange = sheet.getRange(1, 1, 1, 6);\n  headerRange.setBackground('#00529C')\n             .setFontColor('#FFFFFF')\n             .setFontWeight('bold')\n             .setHorizontalAlignment('center')\n             .setVerticalAlignment('middle');\n  sheet.setRowHeight(1, 35);\n\n  if (rows.length > 1) {\n    sheet.getRange(2, 1, rows.length - 1, 1).setHorizontalAlignment('center');\n    sheet.getRange(2, 2, rows.length - 1, 1).setHorizontalAlignment('center');\n    sheet.getRange(2, 3, rows.length - 1, 1).setHorizontalAlignment('center');\n    sheet.getRange(2, 5, rows.length - 1, 1).setHorizontalAlignment('center');\n  }\n\n  sheet.setFrozenRows(1);\n  sheet.autoResizeColumns(1, 6);\n\n  return jsonResponse({\n    status: 'success',\n    message: 'Đã đồng bộ thành công ' + mappings.length + ' dòng ánh xạ lên Database DM_QTPN!',\n    count: mappings.length,\n    updatedAt: new Date().toISOString()\n  });\n}\n\n/**\n * =========================================================================================\n * XỬ LÝ ĐỊNH BIÊN & NHÂN SỰ CB-NV (DM_CBNV)\n * =========================================================================================\n */\nfunction readDmCbnv(ss) {\n  var sheet = ss.getSheetByName(SHEET_DM_CBNV);\n  if (!sheet || sheet.getLastRow() <= 1) return [];\n\n  var data = sheet.getDataRange().getValues();\n  if (data.length <= 1) return [];\n\n  var headers = data[0].map(function(h) { return String(h || '').trim().toLowerCase(); });\n  var colMap = { stt: 0, khoi: -1, maQt: -1, tenQt: -1, maPn: -1, tenPn: -1, nam: -1, thang: -1, dinhBien: -1, thucTe: -1, ghiChu: -1 };\n\n  for (var c = 0; c < headers.length; c++) {\n    var h = headers[c];\n    if (h.indexOf('khối') !== -1 || h.indexOf('khoi') !== -1) colMap.khoi = c;\n    else if (h.indexOf('mã quản trị') !== -1 || h.indexOf('ma qt') !== -1) colMap.maQt = c;\n    else if (h.indexOf('tên quản trị') !== -1 || h.indexOf('ten qt') !== -1) colMap.tenQt = c;\n    else if (h.indexOf('mã đvcs') !== -1 || h.indexOf('mã pn') !== -1 || h.indexOf('mã pháp nhân') !== -1) colMap.maPn = c;\n    else if (h.indexOf('tên pháp nhân') !== -1 || h.indexOf('tên showroom') !== -1 || h.indexOf('tên đvcs') !== -1 || h.indexOf('tên pn') !== -1) colMap.tenPn = c;\n    else if (h.indexOf('năm') !== -1 || h.indexOf('nam') !== -1 || h.indexOf('year') !== -1) colMap.nam = c;\n    else if (h.indexOf('tháng') !== -1 || h.indexOf('thang') !== -1 || h.indexOf('kỳ') !== -1 || h.indexOf('ky') !== -1 || h.indexOf('month') !== -1) colMap.thang = c;\n    else if (h.indexOf('định biên') !== -1 || h.indexOf('dinh bien') !== -1) colMap.dinhBien = c;\n    else if (h.indexOf('thực tế') !== -1 || h.indexOf('thuc te') !== -1) colMap.thucTe = c;\n    else if (h.indexOf('ghi chú') !== -1 || h.indexOf('ghi chu') !== -1) colMap.ghiChu = c;\n  }\n\n  // Fallback định vị cột Tháng nếu sheet có 11 cột mà tên tiêu đề không khớp chính xác\n  if (colMap.thang === -1 && headers.length >= 11) {\n    colMap.thang = 7; // Cột H (index 7)\n  }\n\n  var list = [];\n  for (var r = 1; r < data.length; r++) {\n    var row = data[r];\n    if (!row || row.every(function(cell) { return cell === '' || cell === null; })) continue;\n\n    var maPn = colMap.maPn !== -1 ? String(row[colMap.maPn] || '').trim() : '';\n    var tenPn = colMap.tenPn !== -1 ? String(row[colMap.tenPn] || '').trim() : '';\n    if (!maPn && !tenPn) continue;\n\n    var rawThang = colMap.thang !== -1 ? row[colMap.thang] : '';\n    var thangVal = parseInt(String(rawThang).replace(/[^0-9]/g, ''), 10) || 1;\n\n    list.push({\n      stt: parseInt(row[colMap.stt], 10) || (list.length + 1),\n      khoi: colMap.khoi !== -1 ? String(row[colMap.khoi] || '').trim() : 'VPĐH',\n      maQt: colMap.maQt !== -1 ? String(row[colMap.maQt] || '').trim() : '',\n      tenQt: colMap.tenQt !== -1 ? String(row[colMap.tenQt] || '').trim() : '',\n      maPn: maPn,\n      tenPn: tenPn,\n      nam: colMap.nam !== -1 ? (parseInt(row[colMap.nam], 10) || 2026) : 2026,\n      thang: thangVal,\n      dinhBien: colMap.dinhBien !== -1 ? (Number(row[colMap.dinhBien]) || 0) : 0,\n      thucTe: colMap.thucTe !== -1 ? (Number(row[colMap.thucTe]) || 0) : 0,\n      ghiChu: colMap.ghiChu !== -1 ? String(row[colMap.ghiChu] || '').trim() : ''\n    });\n  }\n  return list;\n}\n\nfunction handleGetDmCbnv() {\n  var ss = SpreadsheetApp.getActiveSpreadsheet();\n  var cbnvList = readDmCbnv(ss);\n  return jsonResponse({\n    status: 'success',\n    sheet: SHEET_DM_CBNV,\n    count: cbnvList.length,\n    updatedAt: new Date().toISOString(),\n    cbnvData: cbnvList\n  });\n}\n\nfunction handleSaveDmCbnv(payload) {\n  var list = payload.cbnvData || payload.data || payload.rows;\n  if (!list || !Array.isArray(list)) {\n    return jsonResponse({ status: 'error', message: 'Mảng cbnvData không đúng định dạng.' });\n  }\n\n  var mode = payload.mode || 'upsert'; // 'upsert' (mặc định) | 'overwrite'\n  var ss = SpreadsheetApp.getActiveSpreadsheet();\n  var sheet = ss.getSheetByName(SHEET_DM_CBNV);\n  if (!sheet) {\n    sheet = ss.insertSheet(SHEET_DM_CBNV);\n  }\n\n  var headerRow = [\n    'STT',\n    'Khối Đơn Vị',\n    'Mã Quản trị',\n    'Tên Quản trị',\n    'Mã ĐVCS',\n    'Tên Pháp Nhân / Showroom',\n    'Năm',\n    'Tháng',\n    'Định Biên (Người)',\n    'Thực Tế (Người)',\n    'Ghi Chú'\n  ];\n\n  var existingRows = [];\n  if (sheet.getLastRow() > 1 && mode !== 'overwrite') {\n    existingRows = readDmCbnv(ss);\n  }\n\n  var finalRecords = [];\n  if (mode === 'overwrite' || existingRows.length === 0) {\n    finalRecords = list.slice();\n  } else {\n    // Mode upsert: Map theo Khóa duy nhất (Mã ĐVCS + Năm + Tháng)\n    var recordMap = {};\n    existingRows.forEach(function(rec) {\n      var key = (String(rec.maPn || rec.code || '').trim() + '_' + (rec.nam || 2026) + '_' + (rec.thang || 1)).toUpperCase();\n      recordMap[key] = rec;\n    });\n\n    list.forEach(function(item) {\n      var key = (String(item.maPn || item.code || '').trim() + '_' + (item.nam || item.year || 2026) + '_' + (item.thang || item.month || 1)).toUpperCase();\n      recordMap[key] = item; // Ghi đè hoặc thêm mới\n    });\n\n    finalRecords = Object.keys(recordMap).map(function(k) { return recordMap[k]; });\n  }\n\n  // Sắp xếp dữ liệu: Theo Năm tăng dần -> Tháng tăng dần -> Mã ĐVCS\n  finalRecords.sort(function(a, b) {\n    var ya = parseInt(a.nam || a.year || 2026, 10);\n    var yb = parseInt(b.nam || b.year || 2026, 10);\n    if (ya !== yb) return ya - yb;\n\n    var ma = parseInt(a.thang || a.month || 1, 10);\n    var mb = parseInt(b.thang || b.month || 1, 10);\n    if (ma !== mb) return ma - mb;\n\n    var ca = String(a.maPn || a.code || '');\n    var cb = String(b.maPn || b.code || '');\n    return ca.localeCompare(cb);\n  });\n\n  var rows = [headerRow];\n  finalRecords.forEach(function(item, idx) {\n    rows.push([\n      idx + 1,\n      item.khoi || 'VPĐH',\n      item.maQt || '',\n      item.tenQt || '',\n      item.maPn || item.code || '',\n      item.tenPn || item.name || '',\n      item.nam || item.year || 2026,\n      item.thang || item.month || 1,\n      Number(item.dinhBien) || 0,\n      Number(item.thucTe) || 0,\n      item.ghiChu || ''\n    ]);\n  });\n\n  sheet.clear();\n  sheet.getRange(1, 1, rows.length, 11).setValues(rows);\n\n  var headerRange = sheet.getRange(1, 1, 1, 11);\n  headerRange.setBackground('#00529C')\n             .setFontColor('#FFFFFF')\n             .setFontWeight('bold')\n             .setHorizontalAlignment('center')\n             .setVerticalAlignment('middle');\n  sheet.setRowHeight(1, 35);\n\n  if (rows.length > 1) {\n    sheet.getRange(2, 1, rows.length - 1, 1).setHorizontalAlignment('center'); // STT\n    sheet.getRange(2, 2, rows.length - 1, 1).setHorizontalAlignment('center'); // Khối\n    sheet.getRange(2, 3, rows.length - 1, 1).setHorizontalAlignment('center'); // Mã QT\n    sheet.getRange(2, 5, rows.length - 1, 1).setHorizontalAlignment('center'); // Mã ĐVCS\n    sheet.getRange(2, 7, rows.length - 1, 2).setHorizontalAlignment('center'); // Năm, Tháng\n    sheet.getRange(2, 9, rows.length - 1, 2).setNumberFormat('#,##0').setHorizontalAlignment('right'); // Định Biên, Thực Tế\n  }\n\n  sheet.setFrozenRows(1);\n  sheet.autoResizeColumns(1, 11);\n\n  return jsonResponse({\n    status: 'success',\n    message: 'Đã đồng bộ thành công ' + finalRecords.length + ' dòng nhân sự (theo Tháng) lên Database DM_CBNV!',\n    count: finalRecords.length,\n    updatedAt: new Date().toISOString()\n  });\n}\n\n/**\n * =========================================================================================\n * XỬ LÝ CHI PHÍ ĐÃ LÀM SẠCH (CP_AUTO / CP_PP / CP_CTTT)\n * =========================================================================================\n */\nfunction handleGetCostData(sheetName) {\n  var ss = SpreadsheetApp.getActiveSpreadsheet();\n  var sheet = ss.getSheetByName(sheetName);\n  if (!sheet) {\n    return jsonResponse({\n      status: 'error',\n      message: 'Sheet \"' + sheetName + '\" chưa tồn tại trên file này.'\n    });\n  }\n\n  var rows = readSheetCostRows(ss, sheetName);\n\n  return jsonResponse({\n    status: 'success',\n    sheet: sheetName,\n    count: rows.length,\n    rows: rows\n  });\n}\n\nfunction handleSaveCostData(payload) {\n  var targetSheet = payload.targetSheet || 'CP_AUTO';\n  if (COST_SHEETS.indexOf(targetSheet) === -1) {\n    targetSheet = 'CP_AUTO';\n  }\n\n  var newRows = payload.rows;\n  if (!newRows || !Array.isArray(newRows)) {\n    return jsonResponse({ status: 'error', message: 'Mảng rows không đúng định dạng.' });\n  }\n\n  var entityCode = payload.entityCode ? String(payload.entityCode).trim() : '';\n  var year = payload.year ? parseInt(payload.year, 10) : null;\n  var mode = payload.mode || 'replace_year_entity'; // 'replace_year_entity' | 'overwrite' | 'append'\n\n  var ss = SpreadsheetApp.getActiveSpreadsheet();\n  var sheet = ss.getSheetByName(targetSheet);\n  if (!sheet) {\n    sheet = ss.insertSheet(targetSheet);\n  }\n\n  var existingValues = [];\n  if (sheet.getLastRow() > 1 && mode === 'replace_year_entity') {\n    existingValues = sheet.getRange(2, 1, sheet.getLastRow() - 1, COST_COLUMNS.length).getValues();\n  }\n\n  var preservedRows = [];\n  if (mode === 'replace_year_entity' && existingValues.length > 0) {\n    preservedRows = existingValues.filter(function(row) {\n      var rowEntity = String(row[1] || '').trim(); // Cột 2: Mã ĐVCS\n      var rowYear = parseInt(row[11], 10);        // Cột 12: Năm\n      if (entityCode && year) {\n        return !(rowEntity === entityCode && rowYear === year);\n      } else if (year) {\n        return rowYear !== year;\n      } else if (entityCode) {\n        return rowEntity !== entityCode;\n      }\n      return false;\n    });\n  }\n\n  // Chuẩn hóa dữ liệu mới thành mảng 2 chiều theo đúng 26 cột COST_COLUMNS\n  var formattedNewRows = newRows.map(function(item) {\n    if (Array.isArray(item)) return item;\n\n    var months = item.months || [0,0,0,0,0,0,0,0,0,0,0,0];\n    var totalVal = typeof item.total === 'number' ? item.total : months.reduce(function(a,b){ return a + (b||0); }, 0);\n\n    return [\n      item.stt || '',\n      item.entityCode || entityCode || 'C1101',\n      item.entityName || 'THACO AUTO',\n      item.km || item.b7 || '',\n      item.tenKm || item.name || '',\n      item.nhom || 'Chi phí hoạt động chung',\n      item.b10 || '',\n      item.isMaterial ? '⭐' : '',\n      item.bp || '',\n      item.tenBp || '',\n      item.khoiPb || '',\n      item.year || year || 2026,\n      item.ky || (item.year === 2025 ? 'Cả năm' : 'T1 - T7'),\n      months[0] || 0,\n      months[1] || 0,\n      months[2] || 0,\n      months[3] || 0,\n      months[4] || 0,\n      months[5] || 0,\n      months[6] || 0,\n      months[7] || 0,\n      months[8] || 0,\n      months[9] || 0,\n      months[10] || 0,\n      months[11] || 0,\n      totalVal\n    ];\n  });\n\n  var finalDataRows = preservedRows.concat(formattedNewRows);\n\n  // Đánh lại số thứ tự STT\n  finalDataRows.forEach(function(r, idx) {\n    r[0] = idx + 1;\n  });\n\n  // Ghi toàn bộ dữ liệu (Header + Rows)\n  sheet.clear();\n  var writeArray = [COST_COLUMNS].concat(finalDataRows);\n\n  var numRows = writeArray.length;\n  var numCols = COST_COLUMNS.length;\n\n  sheet.getRange(1, 1, numRows, numCols).setValues(writeArray);\n\n  // Định dạng tiêu đề THACO Royal Blue #00529C\n  var headerRange = sheet.getRange(1, 1, 1, numCols);\n  headerRange.setBackground('#00529C')\n             .setFontColor('#FFFFFF')\n             .setFontWeight('bold')\n             .setHorizontalAlignment('center')\n             .setVerticalAlignment('middle');\n  sheet.setRowHeight(1, 35);\n\n  if (numRows > 1) {\n    // Căn giữa các cột mã số, năm, kỳ\n    sheet.getRange(2, 1, numRows - 1, 1).setHorizontalAlignment('center'); // STT\n    sheet.getRange(2, 2, numRows - 1, 1).setHorizontalAlignment('center'); // Mã ĐVCS\n    sheet.getRange(2, 4, numRows - 1, 1).setHorizontalAlignment('center'); // Mã B7\n    sheet.getRange(2, 7, numRows - 1, 2).setHorizontalAlignment('center'); // Mã B10, Trọng yếu\n    sheet.getRange(2, 9, numRows - 1, 1).setHorizontalAlignment('center'); // Mã BP\n    sheet.getRange(2, 11, numRows - 1, 3).setHorizontalAlignment('center'); // Khối PB, Năm, Kỳ\n\n    // Định dạng số tiền (cột T01 đến Tổng Cộng) dạng phân cách hàng ngàn #,##0\n    var moneyRange = sheet.getRange(2, 14, numRows - 1, 13);\n    moneyRange.setNumberFormat('#,##0').setHorizontalAlignment('right');\n  }\n\n  sheet.setFrozenRows(1);\n  sheet.setFrozenColumns(5); // Cố định 5 cột đầu (STT, Mã ĐVCS, Đơn vị, Mã B7, Tên Khoản Mục)\n  sheet.autoResizeColumns(1, numCols);\n\n  var totalMoney = formattedNewRows.reduce(function(acc, r) { return acc + (Number(r[25]) || 0); }, 0);\n\n  return jsonResponse({\n    status: 'success',\n    sheet: targetSheet,\n    mode: mode,\n    newRowsCount: formattedNewRows.length,\n    totalRowsInSheet: finalDataRows.length,\n    totalMoneyVND: totalMoney,\n    message: 'Đã lưu thành công ' + formattedNewRows.length + ' dòng dữ liệu vào sheet ' + targetSheet + ' (Tổng tiền: ' + totalMoney.toLocaleString('vi-VN') + ' đ)!'\n  });\n}\n\n/**\n * =========================================================================================\n * CÁC HÀM TIỆN ÍCH MENU CHO NGƯỜI DÙNG TRÊN Database\n * =========================================================================================\n */\nfunction checkDmStructure() {\n  var ss = SpreadsheetApp.getActiveSpreadsheet();\n  var sheet = ss.getSheetByName(SHEET_DM_CPHC);\n  if (!sheet) {\n    SpreadsheetApp.getUi().alert('Chưa có sheet \"' + SHEET_DM_CPHC + '\". Hãy bấm đồng bộ từ Web App để tự động tạo.');\n    return;\n  }\n  var count = Math.max(0, sheet.getLastRow() - 1);\n  SpreadsheetApp.getUi().alert('Sheet DM_CPHC đang có ' + count + ' khoản mục chi phí.');\n}\n\nfunction formatDmSheet() {\n  var ss = SpreadsheetApp.getActiveSpreadsheet();\n  var sheet = ss.getSheetByName(SHEET_DM_CPHC);\n  if (!sheet || sheet.getLastRow() < 1) return;\n  sheet.autoResizeColumns(1, 6);\n  SpreadsheetApp.getActiveSpreadsheet().toast('Đã định dạng lại sheet DM_CPHC!', 'THACO AUTO', 3);\n}\n\nfunction checkDmQtpnStructure() {\n  var ss = SpreadsheetApp.getActiveSpreadsheet();\n  var sheet = ss.getSheetByName(SHEET_DM_QTPN);\n  if (!sheet) {\n    SpreadsheetApp.getUi().alert('Chưa có sheet \"' + SHEET_DM_QTPN + '\". Hãy bấm đồng bộ từ Web App để tự động tạo.');\n    return;\n  }\n  var count = Math.max(0, sheet.getLastRow() - 1);\n  SpreadsheetApp.getUi().alert('Sheet DM_QTPN đang có ' + count + ' dòng ánh xạ.');\n}\n\nfunction formatDmQtpnSheet() {\n  var ss = SpreadsheetApp.getActiveSpreadsheet();\n  var sheet = ss.getSheetByName(SHEET_DM_QTPN);\n  if (!sheet || sheet.getLastRow() < 1) return;\n  sheet.autoResizeColumns(1, 6);\n  SpreadsheetApp.getActiveSpreadsheet().toast('Đã định dạng lại sheet DM_QTPN!', 'THACO AUTO', 3);\n}\n\nfunction checkDmCbnvStructure() {\n  var ss = SpreadsheetApp.getActiveSpreadsheet();\n  var sheet = ss.getSheetByName(SHEET_DM_CBNV);\n  if (!sheet) {\n    SpreadsheetApp.getUi().alert('Chưa có sheet \"' + SHEET_DM_CBNV + '\". Hãy bấm đồng bộ từ Web App để tự động tạo.');\n    return;\n  }\n  var count = Math.max(0, sheet.getLastRow() - 1);\n  SpreadsheetApp.getUi().alert('Sheet DM_CBNV đang có ' + count + ' dòng nhân sự.');\n}\n\nfunction formatDmCbnvSheet() {\n  var ss = SpreadsheetApp.getActiveSpreadsheet();\n  var sheet = ss.getSheetByName(SHEET_DM_CBNV);\n  if (!sheet || sheet.getLastRow() < 1) return;\n  sheet.autoResizeColumns(1, 11);\n  SpreadsheetApp.getActiveSpreadsheet().toast('Đã định dạng lại sheet DM_CBNV!', 'THACO AUTO', 3);\n}\n\nfunction initCostSheets() {\n  var ss = SpreadsheetApp.getActiveSpreadsheet();\n  COST_SHEETS.forEach(function(sName) {\n    var sh = ss.getSheetByName(sName);\n    if (!sh) {\n      sh = ss.insertSheet(sName);\n      sh.getRange(1, 1, 1, COST_COLUMNS.length).setValues([COST_COLUMNS]);\n      sh.getRange(1, 1, 1, COST_COLUMNS.length)\n        .setBackground('#00529C')\n        .setFontColor('#FFFFFF')\n        .setFontWeight('bold')\n        .setHorizontalAlignment('center');\n      sh.setRowHeight(1, 35);\n      sh.setFrozenRows(1);\n      sh.setFrozenColumns(5);\n      sh.autoResizeColumns(1, COST_COLUMNS.length);\n    }\n  });\n  SpreadsheetApp.getUi().alert('Đã khởi tạo xong các sheet: ' + COST_SHEETS.join(', '));\n}\n\nfunction formatAllCostSheets() {\n  var ss = SpreadsheetApp.getActiveSpreadsheet();\n  COST_SHEETS.forEach(function(sName) {\n    var sh = ss.getSheetByName(sName);\n    if (sh && sh.getLastRow() > 0) {\n      sh.autoResizeColumns(1, COST_COLUMNS.length);\n      sh.setFrozenRows(1);\n      sh.setFrozenColumns(5);\n    }\n  });\n  SpreadsheetApp.getActiveSpreadsheet().toast('Đã chuẩn hóa định dạng các sheet chi phí!', 'THACO AUTO', 3);\n}\n\nfunction jsonResponse(obj) {\n  return ContentService\n    .createTextOutput(JSON.stringify(obj))\n    .setMimeType(ContentService.MimeType.JSON);\n}\n";
+    const APPS_SCRIPT_SOURCE_CODE = "/**\n * =========================================================================================\n * GOOGLE APPS SCRIPT: HỆ THỐNG QUẢN TRỊ CHI PHÍ HÀNH CHÍNH - THACO AUTO\n * File Google Sheet: Quan_Ly_Chi_Phi\n * (ID: 1UwV3TbvAfeLZslEazzcFWi5cXsJo98AQmxX5dXH1Pqo)\n * \n * Các Sheet quản lý:\n * 1. DM_CPHC : Cấu hình danh mục phí, mã B7, mã B10, Nhóm phí, Trọng yếu (⭐)\n * 2. DM_QTPN : Danh mục ánh xạ Quản trị ↔ Pháp nhân (TT, Đơn vị, Mã QT, Tên QT, Mã PN, Tên PN)\n * 3. DM_CBNV : Định biên & Nhân sự CB-NV theo từng pháp nhân\n * 4. CP_AUTO : Toàn bộ dữ liệu chi phí hành chính THACO AUTO (C1101 - VPĐH)\n * 5. CP_PP   : Dữ liệu chi phí hành chính Phân Phối THACO AUTO (C2305 - VPĐH)\n * 6. CP_NM   : Dữ liệu chi phí hành chính Khối Nhà máy Chu Lai\n * 7. CP_CTTT : Dữ liệu chi phí hành chính các Công ty Tỉnh Thành (Phía Bắc & Phía Nam)\n * =========================================================================================\n * \n * HƯỚNG DẪN TRIỂN KHAI / CẬP NHẬT (MẤT 1 PHÚT):\n * 1. Mở file Google Sheet Quan_Ly_Chi_Phi trên trình duyệt:\n *    https://docs.google.com/spreadsheets/d/1UwV3TbvAfeLZslEazzcFWi5cXsJo98AQmxX5dXH1Pqo/edit\n * 2. Vào menu \"Tiện ích mở rộng\" (Extensions) > chọn \"Apps Script\".\n * 3. Dán toàn bộ mã nguồn này đè vào file Code.gs và bấm Ctrl + S (Lưu).\n * 4. Bấm \"Triển khai\" (Deploy) > \"Quản lý bản triển khai\" (Manage deployments) hoặc \"Triển khai mới\" (New deployment).\n * 5. Chọn loại \"Ứng dụng web\" (Web app):\n *    - Thực thi dưới dạng (Execute as): \"Tôi\" (Me)\n *    - Ai có quyền truy cập (Who has access): \"Bất kỳ ai\" (Anyone)\n * 6. Bấm \"Triển khai\" (Deploy) > Sao chép \"URL ứng dụng web\" dán vào Web App.\n * =========================================================================================\n */\n\nvar SHEET_DM_CPHC = 'DM_CPHC';\nvar SHEET_DM_QTPN = 'DM_QTPN';\nvar SHEET_DM_CBNV = 'DM_CBNV';\nvar COST_SHEETS = ['CP_AUTO', 'CP_PP', 'CP_NM', 'CP_CTTT'];\n\nvar CBNV_COLUMNS = [\n  'STT',\n  'Khối Đơn Vị',\n  'Mã Quản trị',\n  'Tên Quản trị',\n  'Mã ĐVCS',\n  'Tên Pháp Nhân / Showroom',\n  'Năm',\n  'Tháng',\n  'Định Biên (Người)',\n  'Thực Tế (Người)',\n  'Ghi Chú'\n];\n\nvar SCRIPT_PROP_API_KEY = 'API_KEY';\nvar DEFAULT_SEED_API_KEY = 'THACO_CPHC_2026_SECURE_TOKEN';\n\n/**\n * Lấy khóa API_KEY từ Script Properties, tự động khởi tạo nếu chưa có\n */\nfunction getOrInitApiKey() {\n  var props = PropertiesService.getScriptProperties();\n  var key = props.getProperty(SCRIPT_PROP_API_KEY);\n  if (!key) {\n    key = DEFAULT_SEED_API_KEY;\n    props.setProperty(SCRIPT_PROP_API_KEY, key);\n  }\n  return key;\n}\n\n/**\n * Kiểm tra tính hợp lệ của API_KEY trong request GET hoặc POST\n */\nfunction checkApiKey(e, payload) {\n  var configuredKey = getOrInitApiKey();\n  var providedKey = '';\n\n  if (e && e.parameter) {\n    providedKey = e.parameter.api_key || e.parameter.apiKey || e.parameter.key || '';\n  }\n  if (!providedKey && payload) {\n    providedKey = payload.api_key || payload.apiKey || payload.key || '';\n  }\n\n  return Boolean(providedKey && String(providedKey).trim() === String(configuredKey).trim());\n}\n\nvar COST_COLUMNS = [\n  'STT',\n  'Mã ĐVCS',\n  'Tên Pháp Nhân / Đơn Vị',\n  'Mã B7',\n  'Tên Khoản Mục (B7)',\n  'Nhóm Chi Phí',\n  'Mã B10',\n  'Trọng Yếu (⭐)',\n  'Mã Bộ Phận',\n  'Tên Bộ Phận',\n  'Khối Phòng Ban',\n  'Năm',\n  'Kỳ Thực Hiện',\n  'T01', 'T02', 'T03', 'T04', 'T05', 'T06',\n  'T07', 'T08', 'T09', 'T10', 'T11', 'T12',\n  'Tổng Cộng'\n];\n\n/**\n * Tạo menu THACO AUTO trong Google Sheet\n */\nfunction onOpen() {\n  SpreadsheetApp.getUi()\n    .createMenu('🚗 THACO AUTO')\n    .addItem('🔐 Kiểm tra / Đổi khóa bảo mật API_KEY', 'manageApiKeyMenu')\n    .addSeparator()\n    .addItem('🔄 Kiểm tra cấu trúc DM_CPHC', 'checkDmStructure')\n    .addItem('✨ Chuẩn hóa định dạng DM_CPHC', 'formatDmSheet')\n    .addSeparator()\n    .addItem('🔄 Kiểm tra cấu trúc DM_QTPN', 'checkDmQtpnStructure')\n    .addItem('✨ Chuẩn hóa định dạng DM_QTPN', 'formatDmQtpnSheet')\n    .addSeparator()\n    .addItem('🔄 Kiểm tra cấu trúc DM_CBNV', 'checkDmCbnvStructure')\n    .addItem('✨ Chuẩn hóa định dạng DM_CBNV', 'formatDmCbnvSheet')\n    .addSeparator()\n    .addItem('📊 Khởi tạo cấu trúc các Sheet Chi phí (CP_AUTO, CP_PP, CP_NM, CP_CTTT)', 'initCostSheets')\n    .addItem('✨ Chuẩn hóa định dạng các Sheet Chi phí', 'formatAllCostSheets')\n    .addToUi();\n}\n\n/**\n * Hàm quản trị khóa API_KEY trực tiếp từ Menu Google Sheet\n */\nfunction manageApiKeyMenu() {\n  var ui = SpreadsheetApp.getUi();\n  var currentKey = getOrInitApiKey();\n\n  var res = ui.prompt(\n    '🔐 QUẢN TRỊ KHÓA BẢO MẬT API_KEY (THACO AUTO)',\n    'Khóa API_KEY hiện tại:\\n' + currentKey + '\\n\\nNhập khóa API_KEY mới (hoặc bấm Hủy để giữ nguyên):',\n    ui.ButtonSet.OK_CANCEL\n  );\n\n  if (res.getSelectedButton() === ui.Button.OK) {\n    var newKey = res.getResponseText().trim();\n    if (!newKey) {\n      ui.alert('⚠️ Khóa API_KEY không được để trống.');\n      return;\n    }\n    PropertiesService.getScriptProperties().setProperty(SCRIPT_PROP_API_KEY, newKey);\n    ui.alert('✅ Đã cập nhật khóa API_KEY thành công!\\n\\nKhóa mới: ' + newKey + '\\n\\nVui lòng cập nhật khóa này vào Web App trong mục \"Cài đặt kết nối\".');\n  }\n}\n\n/**\n * =========================================================================================\n * API GET: Đọc dữ liệu từ Google Sheet về Web App\n * Hỗ trợ các chế độ:\n * 1. Mặc định hoặc ?action=get_all : Đọc TOÀN BỘ (DM_CPHC, DM_QTPN và CP_AUTO, CP_PP, CP_CTTT)\n * 2. ?action=get_dm               : Chỉ đọc danh mục DM_CPHC\n * 3. ?action=get_qtpn             : Chỉ đọc danh mục DM_QTPN\n * 4. ?action=get_cphc_data&sheet=CP_AUTO : Chỉ đọc dữ liệu của 1 sheet chi phí cụ thể\n * 5. ?action=test_key             : Kiểm tra xác thực khóa API_KEY\n * =========================================================================================\n */\nfunction doGet(e) {\n  try {\n    var params = e ? e.parameter || {} : {};\n\n    // 🔒 LỚP BẢO MẬT: Kiểm tra API_KEY trước khi xử lý bất kỳ yêu cầu nào\n    if (!checkApiKey(e, null)) {\n      return jsonResponse({\n        status: 'error',\n        code: 401,\n        message: 'Từ chối truy cập: Khóa API_KEY không hợp lệ hoặc chưa được cung cấp. Vui lòng kiểm tra lại cấu hình kết nối trên Web App.'\n      });\n    }\n\n    var action = params.action || 'get_all';\n    var sheetName = params.sheet || '';\n\n    // Kiểm tra kết nối nhanh (Ping/Test key)\n    if (action === 'test_key' || action === 'ping') {\n      return jsonResponse({\n        status: 'success',\n        message: 'Xác thực API_KEY thành công! Kết nối bảo mật hoạt động chuẩn xác.',\n        authenticated: true,\n        timestamp: new Date().toISOString()\n      });\n    }\n\n    // Trường hợp 1: Đọc riêng 1 sheet chi phí\n    if (action === 'get_cphc_data' && sheetName) {\n      return handleGetCostData(sheetName);\n    }\n\n    // Trường hợp 2: Đọc riêng Danh mục DM_CPHC\n    if (action === 'get_dm') {\n      return handleGetDmCphc();\n    }\n\n    // Trường hợp 3: Đọc riêng Danh mục DM_QTPN\n    if (action === 'get_qtpn') {\n      return handleGetDmQtpn();\n    }\n\n    // Trường hợp 4: Đọc riêng Danh mục Định biên / Nhân sự DM_CBNV\n    if (action === 'get_cbnv') {\n      return handleGetDmCbnv();\n    }\n\n    // Trường hợp 5: Mặc định (action === 'get_all' hoặc không truyền tham số):\n    return handleGetAllData();\n\n  } catch (err) {\n    return jsonResponse({\n      status: 'error',\n      message: 'Lỗi doGet: ' + err.toString()\n    });\n  }\n}\n\n/**\n * =========================================================================================\n * API POST: Nhận dữ liệu từ Web App ghi vào Google Sheet\n * Hỗ trợ các chế độ:\n * 1. Ghi chi phí đã làm sạch: payload.action === 'save_cphc_data'\n * 2. Ghi danh mục Quản trị ↔ Pháp nhân: payload.action === 'save_qtpn' hoặc payload.qtpnMappings\n * 3. Ghi danh mục Định biên / Nhân sự: payload.action === 'save_cbnv' hoặc payload.cbnvData\n * 4. Ghi danh mục DM_CPHC: payload.action === 'save_dm' hoặc payload.categories\n * =========================================================================================\n */\nfunction doPost(e) {\n  try {\n    var raw = e.postData && e.postData.contents ? e.postData.contents : '';\n    if (!raw) {\n      return jsonResponse({ status: 'error', message: 'Dữ liệu POST rỗng.' });\n    }\n\n    var payload = JSON.parse(raw);\n\n    // 🔒 LỚP BẢO MẬT: Kiểm tra API_KEY trước khi thực hiện bất kỳ thao tác ghi/xóa nào\n    if (!checkApiKey(e, payload)) {\n      return jsonResponse({\n        status: 'error',\n        code: 401,\n        message: 'Từ chối truy cập: Khóa API_KEY không hợp lệ hoặc chưa được cung cấp. Thao tác ghi dữ liệu bị chặn.'\n      });\n    }\n\n    // Trường hợp 1: Ghi dữ liệu chi phí đã làm sạch từ Bravo (CP_AUTO / CP_PP / CP_CTTT)\n    if (payload.action === 'save_cphc_data') {\n      return handleSaveCostData(payload);\n    }\n\n    // Trường hợp 2: Ghi danh mục Quản trị ↔ Pháp nhân DM_QTPN\n    if (payload.action === 'save_qtpn' || payload.qtpnMappings) {\n      return handleSaveDmQtpn(payload);\n    }\n\n    // Trường hợp 3: Ghi danh mục Định biên / Nhân sự DM_CBNV\n    if (payload.action === 'save_cbnv' || payload.cbnvData) {\n      return handleSaveDmCbnv(payload);\n    }\n\n    // Trường hợp 4: Ghi danh mục DM_CPHC\n    return handleSaveDmCphc(payload);\n\n  } catch (err) {\n    return jsonResponse({\n      status: 'error',\n      message: 'Lỗi doPost: ' + err.toString()\n    });\n  }\n}\n\n/**\n * =========================================================================================\n * XỬ LÝ LẤY TOÀN BỘ DỮ LIỆU (GET_ALL)\n * =========================================================================================\n */\nfunction handleGetAllData() {\n  var ss = SpreadsheetApp.getActiveSpreadsheet();\n\n  // 1. Đọc Danh mục DM_CPHC\n  var categories = readDmCategories(ss);\n\n  // 2. Đọc Danh mục DM_QTPN\n  var qtpnMappings = readDmQtpn(ss);\n\n  // 3. Đọc Danh mục Định biên / Nhân sự DM_CBNV\n  var cbnvData = readDmCbnv(ss);\n\n  // 4. Đọc các sheet chi phí\n  var costSheets = {};\n  var allCostRows = [];\n\n  COST_SHEETS.forEach(function(sName) {\n    var sRows = readSheetCostRows(ss, sName);\n    costSheets[sName] = sRows;\n    allCostRows = allCostRows.concat(sRows);\n  });\n\n  return jsonResponse({\n    status: 'success',\n    updatedAt: new Date().toISOString(),\n    categories: categories,\n    qtpnMappings: qtpnMappings,\n    cbnvData: cbnvData,\n    costSheets: costSheets,\n    allCostRows: allCostRows,\n    totalCostRows: allCostRows.length\n  });\n}\n\n/**\n * Đọc toàn bộ danh mục từ sheet DM_CPHC\n */\nfunction readDmCategories(ss) {\n  var sheet = ss.getSheetByName(SHEET_DM_CPHC);\n  if (!sheet || sheet.getLastRow() <= 1) return [];\n\n  var data = sheet.getDataRange().getValues();\n  if (data.length <= 1) return [];\n\n  var headers = data[0];\n  var colMap = { tt: -1, group: -1, b7: -1, b10: -1, name: -1, isMaterial: -1 };\n\n  for (var c = 0; c < headers.length; c++) {\n    var h = String(headers[c] || '').toLowerCase().trim();\n    if (h.indexOf('tt') !== -1 || h.indexOf('stt') !== -1) colMap.tt = c;\n    else if (h.indexOf('nhóm') !== -1 || h.indexOf('group') !== -1) colMap.group = c;\n    else if (h.indexOf('b7') !== -1) colMap.b7 = c;\n    else if (h.indexOf('b10') !== -1) colMap.b10 = c;\n    else if (h.indexOf('tên') !== -1 || h.indexOf('khoản mục') !== -1 || h.indexOf('diễn giải') !== -1) colMap.name = c;\n    else if (h.indexOf('trọng yếu') !== -1 || h.indexOf('material') !== -1 || h.indexOf('⭐') !== -1) colMap.isMaterial = c;\n  }\n\n  if (colMap.tt === -1) colMap.tt = 0;\n  if (colMap.group === -1) colMap.group = 1;\n  if (colMap.b7 === -1) colMap.b7 = 2;\n  if (colMap.b10 === -1) colMap.b10 = 3;\n  if (colMap.name === -1) colMap.name = 4;\n  if (colMap.isMaterial === -1) colMap.isMaterial = 5;\n\n  var categories = [];\n  var currentGroup = 'Chi phí hoạt động chung';\n\n  for (var r = 1; r < data.length; r++) {\n    var row = data[r];\n    if (!row || row.every(function(cell) { return cell === '' || cell === null; })) continue;\n\n    var nameVal = String(row[colMap.name] || '').trim();\n    var b7Val = String(row[colMap.b7] || '').trim();\n    var b10Val = String(row[colMap.b10] || '').trim();\n    var grpVal = String(row[colMap.group] || '').trim();\n    var ttVal = parseInt(row[colMap.tt], 10) || (categories.length + 1);\n\n    var isMat = false;\n    if (colMap.isMaterial !== -1 && row[colMap.isMaterial]) {\n      var mStr = String(row[colMap.isMaterial]).toLowerCase().trim();\n      isMat = (mStr === 'true' || mStr === '1' || mStr === 'x' || mStr === '⭐' || mStr === 'có');\n    }\n\n    if (grpVal) currentGroup = grpVal;\n    if (!b7Val && !b10Val && !nameVal) continue;\n\n    var b7Codes = b7Val ? b7Val.split(/[,;\\s]+/).map(function(s){ return s.trim(); }).filter(Boolean) : [];\n    var b10Codes = b10Val ? b10Val.split(/[,;\\s]+/).map(function(s){ return s.trim(); }).filter(Boolean) : [];\n\n    categories.push({\n      id: r,\n      tt: ttVal,\n      group: currentGroup,\n      b7_display: b7Val,\n      b10_display: b10Val,\n      b7_codes: b7Codes,\n      b10_codes: b10Codes,\n      name: nameVal || b7Val || ('Khoản mục ' + r),\n      is_material: isMat\n    });\n  }\n\n  return categories;\n}\n\n/**\n * Đọc toàn bộ dòng chi phí từ một sheet chi phí cụ thể\n */\nfunction readSheetCostRows(ss, sheetName) {\n  var sheet = ss.getSheetByName(sheetName);\n  if (!sheet || sheet.getLastRow() <= 1) return [];\n\n  var data = sheet.getDataRange().getValues();\n  if (data.length <= 1) return [];\n\n  var headers = data[0];\n  var rows = [];\n\n  for (var r = 1; r < data.length; r++) {\n    var raw = data[r];\n    if (!raw || raw.every(function(c) { return c === '' || c === null; })) continue;\n\n    var item = {};\n    for (var c = 0; c < headers.length; c++) {\n      item[headers[c]] = raw[c];\n    }\n    rows.push(item);\n  }\n\n  return rows;\n}\n\n/**\n * =========================================================================================\n * XỬ LÝ DANH MỤC PHÍ (DM_CPHC)\n * =========================================================================================\n */\nfunction handleGetDmCphc() {\n  var ss = SpreadsheetApp.getActiveSpreadsheet();\n  var categories = readDmCategories(ss);\n\n  return jsonResponse({\n    status: 'success',\n    sheet: SHEET_DM_CPHC,\n    count: categories.length,\n    updatedAt: new Date().toISOString(),\n    categories: categories\n  });\n}\n\nfunction handleSaveDmCphc(payload) {\n  var categories = payload.categories;\n  if (!categories || !Array.isArray(categories)) {\n    return jsonResponse({ status: 'error', message: 'Mảng categories không đúng định dạng.' });\n  }\n\n  var ss = SpreadsheetApp.getActiveSpreadsheet();\n  var sheet = ss.getSheetByName(SHEET_DM_CPHC);\n  if (!sheet) {\n    sheet = ss.insertSheet(SHEET_DM_CPHC);\n  }\n\n  sheet.clear();\n\n  var headerRow = [\n    'TT',\n    'Nhóm Chi Phí',\n    'Mã Bravo 7',\n    'Mã Bravo 10',\n    'Tên Khoản Mục / Diễn Giải',\n    'Trọng yếu (⭐)'\n  ];\n\n  var rows = [headerRow];\n  categories.forEach(function(cat, index) {\n    var b7Text = cat.b7_display || (cat.b7_codes ? cat.b7_codes.join(', ') : '');\n    var b10Text = cat.b10_display || (cat.b10_codes ? cat.b10_codes.join(', ') : '');\n    var tt = cat.tt || (index + 1);\n    var grp = cat.group || 'Chi phí hoạt động chung';\n    var name = cat.name || '';\n    var mat = cat.is_material ? '⭐' : '';\n    rows.push([tt, grp, b7Text, b10Text, name, mat]);\n  });\n\n  sheet.getRange(1, 1, rows.length, 6).setValues(rows);\n\n  var headerRange = sheet.getRange(1, 1, 1, 6);\n  headerRange.setBackground('#00529C')\n             .setFontColor('#FFFFFF')\n             .setFontWeight('bold')\n             .setHorizontalAlignment('center')\n             .setVerticalAlignment('middle');\n  sheet.setRowHeight(1, 35);\n\n  if (rows.length > 1) {\n    sheet.getRange(2, 1, rows.length - 1, 1).setHorizontalAlignment('center');\n    sheet.getRange(2, 3, rows.length - 1, 2).setHorizontalAlignment('center');\n    sheet.getRange(2, 6, rows.length - 1, 1).setHorizontalAlignment('center');\n  }\n\n  sheet.setFrozenRows(1);\n  sheet.autoResizeColumns(1, 6);\n\n  return jsonResponse({\n    status: 'success',\n    message: 'Đã đồng bộ thành công ' + categories.length + ' khoản mục lên Google Sheet DM_CPHC!',\n    count: categories.length,\n    updatedAt: new Date().toISOString()\n  });\n}\n\n/**\n * =========================================================================================\n * XỬ LÝ QUẢN TRỊ ↔ PHÁP NHÂN (DM_QTPN)\n * =========================================================================================\n */\nfunction handleGetDmQtpn() {\n  var ss = SpreadsheetApp.getActiveSpreadsheet();\n  var mappings = readDmQtpn(ss);\n\n  return jsonResponse({\n    status: 'success',\n    sheet: SHEET_DM_QTPN,\n    count: mappings.length,\n    updatedAt: new Date().toISOString(),\n    qtpnMappings: mappings\n  });\n}\n\nfunction readDmQtpn(ss) {\n  var sheet = ss.getSheetByName(SHEET_DM_QTPN);\n  if (!sheet || sheet.getLastRow() <= 1) return [];\n\n  var data = sheet.getDataRange().getValues();\n  if (data.length <= 1) return [];\n\n  var headers = data[0].map(function(h) { return String(h || '').trim().toLowerCase(); });\n  var colMap = { tt: 0, khoi: -1, maQt: -1, tenQt: -1, maPn: -1, tenPn: -1 };\n\n  for (var c = 0; c < headers.length; c++) {\n    var h = headers[c];\n    if (h.indexOf('khối') !== -1 || h.indexOf('khoi') !== -1 || h.indexOf('đơn vị') !== -1 && h.indexOf('quản trị') === -1) colMap.khoi = c;\n    else if (h.indexOf('mã quản trị') !== -1 || h.indexOf('ma quan tri') !== -1 || h.indexOf('mã qt') !== -1) colMap.maQt = c;\n    else if (h.indexOf('tên quản trị') !== -1 || h.indexOf('ten quan tri') !== -1 || h.indexOf('đơn vị quản trị') !== -1 || h.indexOf('tên qt') !== -1) colMap.tenQt = c;\n    else if (h.indexOf('mã pháp nhân') !== -1 || h.indexOf('ma phap nhan') !== -1 || h.indexOf('mã đvcs') !== -1 || h.indexOf('mã pn') !== -1) colMap.maPn = c;\n    else if (h.indexOf('tên pháp nhân') !== -1 || h.indexOf('ten phap nhan') !== -1 || h.indexOf('tên đvcs') !== -1 || h.indexOf('tên pn') !== -1 || h.indexOf('showroom') !== -1) colMap.tenPn = c;\n  }\n\n  // Fallback nếu không khớp từ khóa\n  var is6Cols = data[0].length >= 6;\n  if (colMap.khoi === -1) colMap.khoi = is6Cols ? 1 : -1;\n  if (colMap.maQt === -1) colMap.maQt = is6Cols ? 2 : 1;\n  if (colMap.tenQt === -1) colMap.tenQt = is6Cols ? 3 : 2;\n  if (colMap.maPn === -1) colMap.maPn = is6Cols ? 4 : 3;\n  if (colMap.tenPn === -1) colMap.tenPn = is6Cols ? 5 : 4;\n\n  var mappings = [];\n  for (var r = 1; r < data.length; r++) {\n    var row = data[r];\n    if (!row || row.every(function(cell) { return cell === '' || cell === null; })) continue;\n\n    var khoi = colMap.khoi !== -1 ? String(row[colMap.khoi] || '').trim() : 'VPĐH';\n    var maQt = String(row[colMap.maQt] || '').trim();\n    var tenQt = String(row[colMap.tenQt] || '').trim();\n    var maPn = String(row[colMap.maPn] || '').trim();\n    var tenPn = String(row[colMap.tenPn] || '').trim();\n\n    if (!maQt && !tenQt && !maPn && !tenPn) continue;\n\n    mappings.push({\n      stt: parseInt(row[colMap.tt], 10) || (mappings.length + 1),\n      khoi: khoi || 'VPĐH',\n      maQt: maQt,\n      tenQt: tenQt,\n      maPn: maPn,\n      tenPn: tenPn\n    });\n  }\n\n  return mappings;\n}\n\nfunction handleSaveDmQtpn(payload) {\n  var mappings = payload.qtpnMappings || payload.mappings;\n  if (!mappings || !Array.isArray(mappings)) {\n    return jsonResponse({ status: 'error', message: 'Mảng qtpnMappings không đúng định dạng.' });\n  }\n\n  var ss = SpreadsheetApp.getActiveSpreadsheet();\n  var sheet = ss.getSheetByName(SHEET_DM_QTPN);\n  if (!sheet) {\n    sheet = ss.insertSheet(SHEET_DM_QTPN);\n  }\n\n  sheet.clear();\n\n  var headerRow = [\n    'TT',\n    'Khối Đơn Vị',\n    'Mã Quản trị',\n    'Tên Quản trị',\n    'Mã pháp nhân',\n    'Tên pháp nhân'\n  ];\n\n  var rows = [headerRow];\n  mappings.forEach(function(item, index) {\n    var tt = item.stt || (index + 1);\n    var khoi = item.khoi || 'VPĐH';\n    var maQt = item.maQt || item.maQuanti || '';\n    var tenQt = item.tenQt || item.tenQuanti || '';\n    var maPn = item.maPn || item.maPhapNhan || '';\n    var tenPn = item.tenPn || item.tenPhapNhan || '';\n    rows.push([tt, khoi, maQt, tenQt, maPn, tenPn]);\n  });\n\n  sheet.getRange(1, 1, rows.length, 6).setValues(rows);\n\n  var headerRange = sheet.getRange(1, 1, 1, 6);\n  headerRange.setBackground('#00529C')\n             .setFontColor('#FFFFFF')\n             .setFontWeight('bold')\n             .setHorizontalAlignment('center')\n             .setVerticalAlignment('middle');\n  sheet.setRowHeight(1, 35);\n\n  if (rows.length > 1) {\n    sheet.getRange(2, 1, rows.length - 1, 1).setHorizontalAlignment('center');\n    sheet.getRange(2, 2, rows.length - 1, 1).setHorizontalAlignment('center');\n    sheet.getRange(2, 3, rows.length - 1, 1).setHorizontalAlignment('center');\n    sheet.getRange(2, 5, rows.length - 1, 1).setHorizontalAlignment('center');\n  }\n\n  sheet.setFrozenRows(1);\n  sheet.autoResizeColumns(1, 6);\n\n  return jsonResponse({\n    status: 'success',\n    message: 'Đã đồng bộ thành công ' + mappings.length + ' dòng ánh xạ lên Google Sheet DM_QTPN!',\n    count: mappings.length,\n    updatedAt: new Date().toISOString()\n  });\n}\n\n/**\n * =========================================================================================\n * XỬ LÝ ĐỊNH BIÊN & NHÂN SỰ CB-NV (DM_CBNV)\n * =========================================================================================\n */\nfunction readDmCbnv(ss) {\n  var sheet = ss.getSheetByName(SHEET_DM_CBNV);\n  if (!sheet || sheet.getLastRow() <= 1) return [];\n\n  var data = sheet.getDataRange().getValues();\n  if (data.length <= 1) return [];\n\n  var headers = data[0].map(function(h) { return String(h || '').trim().toLowerCase(); });\n  var colMap = { stt: 0, khoi: -1, maQt: -1, tenQt: -1, maPn: -1, tenPn: -1, nam: -1, thang: -1, dinhBien: -1, thucTe: -1, ghiChu: -1 };\n\n  for (var c = 0; c < headers.length; c++) {\n    var h = headers[c];\n    if (h.indexOf('khối') !== -1 || h.indexOf('khoi') !== -1) colMap.khoi = c;\n    else if (h.indexOf('mã quản trị') !== -1 || h.indexOf('ma qt') !== -1) colMap.maQt = c;\n    else if (h.indexOf('tên quản trị') !== -1 || h.indexOf('ten qt') !== -1) colMap.tenQt = c;\n    else if (h.indexOf('mã đvcs') !== -1 || h.indexOf('mã pn') !== -1 || h.indexOf('mã pháp nhân') !== -1) colMap.maPn = c;\n    else if (h.indexOf('tên pháp nhân') !== -1 || h.indexOf('tên showroom') !== -1 || h.indexOf('tên đvcs') !== -1 || h.indexOf('tên pn') !== -1) colMap.tenPn = c;\n    else if (h.indexOf('năm') !== -1 || h.indexOf('nam') !== -1 || h.indexOf('year') !== -1) colMap.nam = c;\n    else if (h.indexOf('tháng') !== -1 || h.indexOf('thang') !== -1 || h.indexOf('kỳ') !== -1 || h.indexOf('ky') !== -1 || h.indexOf('month') !== -1) colMap.thang = c;\n    else if (h.indexOf('định biên') !== -1 || h.indexOf('dinh bien') !== -1) colMap.dinhBien = c;\n    else if (h.indexOf('thực tế') !== -1 || h.indexOf('thuc te') !== -1) colMap.thucTe = c;\n    else if (h.indexOf('ghi chú') !== -1 || h.indexOf('ghi chu') !== -1) colMap.ghiChu = c;\n  }\n\n  // Fallback định vị cột Tháng nếu sheet có 11 cột mà tên tiêu đề không khớp chính xác\n  if (colMap.thang === -1 && headers.length >= 11) {\n    colMap.thang = 7; // Cột H (index 7)\n  }\n\n  var list = [];\n  for (var r = 1; r < data.length; r++) {\n    var row = data[r];\n    if (!row || row.every(function(cell) { return cell === '' || cell === null; })) continue;\n\n    var maPn = colMap.maPn !== -1 ? String(row[colMap.maPn] || '').trim() : '';\n    var tenPn = colMap.tenPn !== -1 ? String(row[colMap.tenPn] || '').trim() : '';\n    if (!maPn && !tenPn) continue;\n\n    var rawThang = colMap.thang !== -1 ? row[colMap.thang] : '';\n    var thangVal = parseInt(String(rawThang).replace(/[^0-9]/g, ''), 10) || 1;\n\n    list.push({\n      stt: parseInt(row[colMap.stt], 10) || (list.length + 1),\n      khoi: colMap.khoi !== -1 ? String(row[colMap.khoi] || '').trim() : 'VPĐH',\n      maQt: colMap.maQt !== -1 ? String(row[colMap.maQt] || '').trim() : '',\n      tenQt: colMap.tenQt !== -1 ? String(row[colMap.tenQt] || '').trim() : '',\n      maPn: maPn,\n      tenPn: tenPn,\n      nam: colMap.nam !== -1 ? (parseInt(row[colMap.nam], 10) || 2026) : 2026,\n      thang: thangVal,\n      dinhBien: colMap.dinhBien !== -1 ? (Number(row[colMap.dinhBien]) || 0) : 0,\n      thucTe: colMap.thucTe !== -1 ? (Number(row[colMap.thucTe]) || 0) : 0,\n      ghiChu: colMap.ghiChu !== -1 ? String(row[colMap.ghiChu] || '').trim() : ''\n    });\n  }\n  return list;\n}\n\nfunction handleGetDmCbnv() {\n  var ss = SpreadsheetApp.getActiveSpreadsheet();\n  var cbnvList = readDmCbnv(ss);\n  return jsonResponse({\n    status: 'success',\n    sheet: SHEET_DM_CBNV,\n    count: cbnvList.length,\n    updatedAt: new Date().toISOString(),\n    cbnvData: cbnvList\n  });\n}\n\nfunction handleSaveDmCbnv(payload) {\n  var list = payload.cbnvData || payload.data || payload.rows;\n  if (!list || !Array.isArray(list)) {\n    return jsonResponse({ status: 'error', message: 'Mảng cbnvData không đúng định dạng.' });\n  }\n\n  var mode = payload.mode || 'upsert'; // 'upsert' (mặc định) | 'overwrite'\n  var ss = SpreadsheetApp.getActiveSpreadsheet();\n  var sheet = ss.getSheetByName(SHEET_DM_CBNV);\n  if (!sheet) {\n    sheet = ss.insertSheet(SHEET_DM_CBNV);\n  }\n\n  var headerRow = [\n    'STT',\n    'Khối Đơn Vị',\n    'Mã Quản trị',\n    'Tên Quản trị',\n    'Mã ĐVCS',\n    'Tên Pháp Nhân / Showroom',\n    'Năm',\n    'Tháng',\n    'Định Biên (Người)',\n    'Thực Tế (Người)',\n    'Ghi Chú'\n  ];\n\n  var existingRows = [];\n  if (sheet.getLastRow() > 1 && mode !== 'overwrite') {\n    existingRows = readDmCbnv(ss);\n  }\n\n  var finalRecords = [];\n  if (mode === 'overwrite' || existingRows.length === 0) {\n    finalRecords = list.slice();\n  } else {\n    // Mode upsert: Map theo Khóa duy nhất (Mã ĐVCS + Năm + Tháng)\n    var recordMap = {};\n    existingRows.forEach(function(rec) {\n      var key = (String(rec.maPn || rec.code || '').trim() + '_' + (rec.nam || 2026) + '_' + (rec.thang || 1)).toUpperCase();\n      recordMap[key] = rec;\n    });\n\n    list.forEach(function(item) {\n      var key = (String(item.maPn || item.code || '').trim() + '_' + (item.nam || item.year || 2026) + '_' + (item.thang || item.month || 1)).toUpperCase();\n      recordMap[key] = item; // Ghi đè hoặc thêm mới\n    });\n\n    finalRecords = Object.keys(recordMap).map(function(k) { return recordMap[k]; });\n  }\n\n  // Sắp xếp dữ liệu: Theo Năm tăng dần -> Tháng tăng dần -> Mã ĐVCS\n  finalRecords.sort(function(a, b) {\n    var ya = parseInt(a.nam || a.year || 2026, 10);\n    var yb = parseInt(b.nam || b.year || 2026, 10);\n    if (ya !== yb) return ya - yb;\n\n    var ma = parseInt(a.thang || a.month || 1, 10);\n    var mb = parseInt(b.thang || b.month || 1, 10);\n    if (ma !== mb) return ma - mb;\n\n    var ca = String(a.maPn || a.code || '');\n    var cb = String(b.maPn || b.code || '');\n    return ca.localeCompare(cb);\n  });\n\n  var rows = [headerRow];\n  finalRecords.forEach(function(item, idx) {\n    rows.push([\n      idx + 1,\n      item.khoi || 'VPĐH',\n      item.maQt || '',\n      item.tenQt || '',\n      item.maPn || item.code || '',\n      item.tenPn || item.name || '',\n      item.nam || item.year || 2026,\n      item.thang || item.month || 1,\n      Number(item.dinhBien) || 0,\n      Number(item.thucTe) || 0,\n      item.ghiChu || ''\n    ]);\n  });\n\n  sheet.clear();\n  sheet.getRange(1, 1, rows.length, 11).setValues(rows);\n\n  var headerRange = sheet.getRange(1, 1, 1, 11);\n  headerRange.setBackground('#00529C')\n             .setFontColor('#FFFFFF')\n             .setFontWeight('bold')\n             .setHorizontalAlignment('center')\n             .setVerticalAlignment('middle');\n  sheet.setRowHeight(1, 35);\n\n  if (rows.length > 1) {\n    sheet.getRange(2, 1, rows.length - 1, 1).setHorizontalAlignment('center'); // STT\n    sheet.getRange(2, 2, rows.length - 1, 1).setHorizontalAlignment('center'); // Khối\n    sheet.getRange(2, 3, rows.length - 1, 1).setHorizontalAlignment('center'); // Mã QT\n    sheet.getRange(2, 5, rows.length - 1, 1).setHorizontalAlignment('center'); // Mã ĐVCS\n    sheet.getRange(2, 7, rows.length - 1, 2).setHorizontalAlignment('center'); // Năm, Tháng\n    sheet.getRange(2, 9, rows.length - 1, 2).setNumberFormat('#,##0').setHorizontalAlignment('right'); // Định Biên, Thực Tế\n  }\n\n  sheet.setFrozenRows(1);\n  sheet.autoResizeColumns(1, 11);\n\n  return jsonResponse({\n    status: 'success',\n    message: 'Đã đồng bộ thành công ' + finalRecords.length + ' dòng nhân sự (theo Tháng) lên Google Sheet DM_CBNV!',\n    count: finalRecords.length,\n    updatedAt: new Date().toISOString()\n  });\n}\n\n/**\n * =========================================================================================\n * XỬ LÝ CHI PHÍ ĐÃ LÀM SẠCH (CP_AUTO / CP_PP / CP_CTTT)\n * =========================================================================================\n */\nfunction handleGetCostData(sheetName) {\n  var ss = SpreadsheetApp.getActiveSpreadsheet();\n  var sheet = ss.getSheetByName(sheetName);\n  if (!sheet) {\n    return jsonResponse({\n      status: 'error',\n      message: 'Sheet \"' + sheetName + '\" chưa tồn tại trên file này.'\n    });\n  }\n\n  var rows = readSheetCostRows(ss, sheetName);\n\n  return jsonResponse({\n    status: 'success',\n    sheet: sheetName,\n    count: rows.length,\n    rows: rows\n  });\n}\n\nfunction handleSaveCostData(payload) {\n  var targetSheet = payload.targetSheet || 'CP_AUTO';\n  if (COST_SHEETS.indexOf(targetSheet) === -1) {\n    targetSheet = 'CP_AUTO';\n  }\n\n  var newRows = payload.rows;\n  if (!newRows || !Array.isArray(newRows)) {\n    return jsonResponse({ status: 'error', message: 'Mảng rows không đúng định dạng.' });\n  }\n\n  var entityCode = payload.entityCode ? String(payload.entityCode).trim() : '';\n  var year = payload.year ? parseInt(payload.year, 10) : null;\n  var mode = payload.mode || 'replace_year_entity'; // 'replace_year_entity' | 'overwrite' | 'append'\n\n  var ss = SpreadsheetApp.getActiveSpreadsheet();\n  var sheet = ss.getSheetByName(targetSheet);\n  if (!sheet) {\n    sheet = ss.insertSheet(targetSheet);\n  }\n\n  var existingValues = [];\n  if (sheet.getLastRow() > 1 && mode === 'replace_year_entity') {\n    existingValues = sheet.getRange(2, 1, sheet.getLastRow() - 1, COST_COLUMNS.length).getValues();\n  }\n\n  var preservedRows = [];\n  if (mode === 'replace_year_entity' && existingValues.length > 0) {\n    preservedRows = existingValues.filter(function(row) {\n      var rowEntity = String(row[1] || '').trim(); // Cột 2: Mã ĐVCS\n      var rowYear = parseInt(row[11], 10);        // Cột 12: Năm\n      if (entityCode && year) {\n        return !(rowEntity === entityCode && rowYear === year);\n      } else if (year) {\n        return rowYear !== year;\n      } else if (entityCode) {\n        return rowEntity !== entityCode;\n      }\n      return false;\n    });\n  }\n\n  // Chuẩn hóa dữ liệu mới thành mảng 2 chiều theo đúng 26 cột COST_COLUMNS\n  var formattedNewRows = newRows.map(function(item) {\n    if (Array.isArray(item)) return item;\n\n    var months = item.months || [0,0,0,0,0,0,0,0,0,0,0,0];\n    var totalVal = typeof item.total === 'number' ? item.total : months.reduce(function(a,b){ return a + (b||0); }, 0);\n\n    return [\n      item.stt || '',\n      item.entityCode || entityCode || 'C1101',\n      item.entityName || 'THACO AUTO',\n      item.km || item.b7 || '',\n      item.tenKm || item.name || '',\n      item.nhom || 'Chi phí hoạt động chung',\n      item.b10 || '',\n      item.isMaterial ? '⭐' : '',\n      item.bp || '',\n      item.tenBp || '',\n      item.khoiPb || '',\n      item.year || year || 2026,\n      item.ky || (item.year === 2025 ? 'Cả năm' : 'T1 - T7'),\n      months[0] || 0,\n      months[1] || 0,\n      months[2] || 0,\n      months[3] || 0,\n      months[4] || 0,\n      months[5] || 0,\n      months[6] || 0,\n      months[7] || 0,\n      months[8] || 0,\n      months[9] || 0,\n      months[10] || 0,\n      months[11] || 0,\n      totalVal\n    ];\n  });\n\n  var finalDataRows = preservedRows.concat(formattedNewRows);\n\n  // Đánh lại số thứ tự STT\n  finalDataRows.forEach(function(r, idx) {\n    r[0] = idx + 1;\n  });\n\n  // Ghi toàn bộ dữ liệu (Header + Rows)\n  sheet.clear();\n  var writeArray = [COST_COLUMNS].concat(finalDataRows);\n\n  var numRows = writeArray.length;\n  var numCols = COST_COLUMNS.length;\n\n  sheet.getRange(1, 1, numRows, numCols).setValues(writeArray);\n\n  // Định dạng tiêu đề THACO Royal Blue #00529C\n  var headerRange = sheet.getRange(1, 1, 1, numCols);\n  headerRange.setBackground('#00529C')\n             .setFontColor('#FFFFFF')\n             .setFontWeight('bold')\n             .setHorizontalAlignment('center')\n             .setVerticalAlignment('middle');\n  sheet.setRowHeight(1, 35);\n\n  if (numRows > 1) {\n    // Căn giữa các cột mã số, năm, kỳ\n    sheet.getRange(2, 1, numRows - 1, 1).setHorizontalAlignment('center'); // STT\n    sheet.getRange(2, 2, numRows - 1, 1).setHorizontalAlignment('center'); // Mã ĐVCS\n    sheet.getRange(2, 4, numRows - 1, 1).setHorizontalAlignment('center'); // Mã B7\n    sheet.getRange(2, 7, numRows - 1, 2).setHorizontalAlignment('center'); // Mã B10, Trọng yếu\n    sheet.getRange(2, 9, numRows - 1, 1).setHorizontalAlignment('center'); // Mã BP\n    sheet.getRange(2, 11, numRows - 1, 3).setHorizontalAlignment('center'); // Khối PB, Năm, Kỳ\n\n    // Định dạng số tiền (cột T01 đến Tổng Cộng) dạng phân cách hàng ngàn #,##0\n    var moneyRange = sheet.getRange(2, 14, numRows - 1, 13);\n    moneyRange.setNumberFormat('#,##0').setHorizontalAlignment('right');\n  }\n\n  sheet.setFrozenRows(1);\n  sheet.setFrozenColumns(5); // Cố định 5 cột đầu (STT, Mã ĐVCS, Đơn vị, Mã B7, Tên Khoản Mục)\n  sheet.autoResizeColumns(1, numCols);\n\n  var totalMoney = formattedNewRows.reduce(function(acc, r) { return acc + (Number(r[25]) || 0); }, 0);\n\n  return jsonResponse({\n    status: 'success',\n    sheet: targetSheet,\n    mode: mode,\n    newRowsCount: formattedNewRows.length,\n    totalRowsInSheet: finalDataRows.length,\n    totalMoneyVND: totalMoney,\n    message: 'Đã lưu thành công ' + formattedNewRows.length + ' dòng dữ liệu vào sheet ' + targetSheet + ' (Tổng tiền: ' + totalMoney.toLocaleString('vi-VN') + ' đ)!'\n  });\n}\n\n/**\n * =========================================================================================\n * CÁC HÀM TIỆN ÍCH MENU CHO NGƯỜI DÙNG TRÊN GOOGLE SHEET\n * =========================================================================================\n */\nfunction checkDmStructure() {\n  var ss = SpreadsheetApp.getActiveSpreadsheet();\n  var sheet = ss.getSheetByName(SHEET_DM_CPHC);\n  if (!sheet) {\n    SpreadsheetApp.getUi().alert('Chưa có sheet \"' + SHEET_DM_CPHC + '\". Hãy bấm đồng bộ từ Web App để tự động tạo.');\n    return;\n  }\n  var count = Math.max(0, sheet.getLastRow() - 1);\n  SpreadsheetApp.getUi().alert('Sheet DM_CPHC đang có ' + count + ' khoản mục chi phí.');\n}\n\nfunction formatDmSheet() {\n  var ss = SpreadsheetApp.getActiveSpreadsheet();\n  var sheet = ss.getSheetByName(SHEET_DM_CPHC);\n  if (!sheet || sheet.getLastRow() < 1) return;\n  sheet.autoResizeColumns(1, 6);\n  SpreadsheetApp.getActiveSpreadsheet().toast('Đã định dạng lại sheet DM_CPHC!', 'THACO AUTO', 3);\n}\n\nfunction checkDmQtpnStructure() {\n  var ss = SpreadsheetApp.getActiveSpreadsheet();\n  var sheet = ss.getSheetByName(SHEET_DM_QTPN);\n  if (!sheet) {\n    SpreadsheetApp.getUi().alert('Chưa có sheet \"' + SHEET_DM_QTPN + '\". Hãy bấm đồng bộ từ Web App để tự động tạo.');\n    return;\n  }\n  var count = Math.max(0, sheet.getLastRow() - 1);\n  SpreadsheetApp.getUi().alert('Sheet DM_QTPN đang có ' + count + ' dòng ánh xạ.');\n}\n\nfunction formatDmQtpnSheet() {\n  var ss = SpreadsheetApp.getActiveSpreadsheet();\n  var sheet = ss.getSheetByName(SHEET_DM_QTPN);\n  if (!sheet || sheet.getLastRow() < 1) return;\n  sheet.autoResizeColumns(1, 6);\n  SpreadsheetApp.getActiveSpreadsheet().toast('Đã định dạng lại sheet DM_QTPN!', 'THACO AUTO', 3);\n}\n\nfunction checkDmCbnvStructure() {\n  var ss = SpreadsheetApp.getActiveSpreadsheet();\n  var sheet = ss.getSheetByName(SHEET_DM_CBNV);\n  if (!sheet) {\n    SpreadsheetApp.getUi().alert('Chưa có sheet \"' + SHEET_DM_CBNV + '\". Hãy bấm đồng bộ từ Web App để tự động tạo.');\n    return;\n  }\n  var count = Math.max(0, sheet.getLastRow() - 1);\n  SpreadsheetApp.getUi().alert('Sheet DM_CBNV đang có ' + count + ' dòng nhân sự.');\n}\n\nfunction formatDmCbnvSheet() {\n  var ss = SpreadsheetApp.getActiveSpreadsheet();\n  var sheet = ss.getSheetByName(SHEET_DM_CBNV);\n  if (!sheet || sheet.getLastRow() < 1) return;\n  sheet.autoResizeColumns(1, 11);\n  SpreadsheetApp.getActiveSpreadsheet().toast('Đã định dạng lại sheet DM_CBNV!', 'THACO AUTO', 3);\n}\n\nfunction initCostSheets() {\n  var ss = SpreadsheetApp.getActiveSpreadsheet();\n  COST_SHEETS.forEach(function(sName) {\n    var sh = ss.getSheetByName(sName);\n    if (!sh) {\n      sh = ss.insertSheet(sName);\n      sh.getRange(1, 1, 1, COST_COLUMNS.length).setValues([COST_COLUMNS]);\n      sh.getRange(1, 1, 1, COST_COLUMNS.length)\n        .setBackground('#00529C')\n        .setFontColor('#FFFFFF')\n        .setFontWeight('bold')\n        .setHorizontalAlignment('center');\n      sh.setRowHeight(1, 35);\n      sh.setFrozenRows(1);\n      sh.setFrozenColumns(5);\n      sh.autoResizeColumns(1, COST_COLUMNS.length);\n    }\n  });\n  SpreadsheetApp.getUi().alert('Đã khởi tạo xong các sheet: ' + COST_SHEETS.join(', '));\n}\n\nfunction formatAllCostSheets() {\n  var ss = SpreadsheetApp.getActiveSpreadsheet();\n  COST_SHEETS.forEach(function(sName) {\n    var sh = ss.getSheetByName(sName);\n    if (sh && sh.getLastRow() > 0) {\n      sh.autoResizeColumns(1, COST_COLUMNS.length);\n      sh.setFrozenRows(1);\n      sh.setFrozenColumns(5);\n    }\n  });\n  SpreadsheetApp.getActiveSpreadsheet().toast('Đã chuẩn hóa định dạng các sheet chi phí!', 'THACO AUTO', 3);\n}\n\nfunction jsonResponse(obj) {\n  return ContentService\n    .createTextOutput(JSON.stringify(obj))\n    .setMimeType(ContentService.MimeType.JSON);\n}\n";
 
     function getGoogleSheetSyncConfig() {
         try {
@@ -1050,7 +1072,7 @@
                 }
                 return parsed;
             }
-        } catch (e) {}
+        } catch (e) { }
         return {
             webAppUrl: '',
             apiKey: 'THACO_CPHC_2026_SECURE_TOKEN',
@@ -1065,7 +1087,7 @@
             window.THACO_LAST_SYNC_ERROR = null;
             updateGoogleSheetSyncUI();
         } catch (e) {
-            console.error('Lỗi lưu cấu hình Database:', e);
+            console.error('Lỗi lưu cấu hình Google Sheet:', e);
         }
     }
 
@@ -1142,7 +1164,7 @@
         const banner = document.getElementById('gsheet-sync-error-banner');
         if (banner) {
             const textEl = document.getElementById('gsheet-sync-error-text');
-            if (textEl) textEl.textContent = msg || 'Không thể kết nối với Database. Đang hiển thị dữ liệu dự phòng.';
+            if (textEl) textEl.textContent = msg || 'Không thể kết nối với Google Sheet. Đang hiển thị dữ liệu dự phòng.';
             banner.classList.remove('hidden');
             banner.style.display = 'flex';
         }
@@ -1160,7 +1182,7 @@
         const overlay = document.getElementById('gsheet-loading-overlay');
         if (overlay) {
             const desc = document.getElementById('gsheet-loading-desc');
-            if (desc) desc.textContent = msg || 'Đang kết nối và tải dữ liệu thực tế từ Database...';
+            if (desc) desc.textContent = msg || 'Đang kết nối và tải dữ liệu thực tế từ Google Sheet...';
             overlay.classList.remove('hidden');
         }
     }
@@ -1228,7 +1250,7 @@
                 tabStatusBadge.innerHTML = '<span class="w-2 h-2 rounded-full bg-emerald-600 animate-pulse"></span> Đã kết nối Live Sync';
             }
             if (statusMsg) {
-                statusMsg.textContent = timeStr ? `Đã đồng bộ gần nhất lúc ${timeStr}. Mọi thêm/sửa/xóa tự động cập nhật 2 chiều.` : 'Sẵn sàng đồng bộ 2 chiều với Database.';
+                statusMsg.textContent = timeStr ? `Đã đồng bộ gần nhất lúc ${timeStr}. Mọi thêm/sửa/xóa tự động cập nhật 2 chiều.` : 'Sẵn sàng đồng bộ 2 chiều với Google Sheet.';
             }
             if (tabLastTime) {
                 tabLastTime.textContent = timeStr ? `Lần đồng bộ gần nhất: ${timeStr}` : 'Sẵn sàng đồng bộ 2 chiều.';
@@ -1243,7 +1265,7 @@
                 tabStatusBadge.textContent = '⚪ Chưa kết nối Apps Script URL';
             }
             if (statusMsg) {
-                statusMsg.textContent = 'Nhấp "⚙️ Cài đặt kết nối" để dán Web App URL và kích hoạt đồng bộ 2 chiều với Database.';
+                statusMsg.textContent = 'Nhấp "⚙️ Cài đặt kết nối" để dán Web App URL và kích hoạt đồng bộ 2 chiều với Google Sheet.';
             }
             if (tabLastTime) {
                 tabLastTime.textContent = 'Chưa có lượt đồng bộ nào trong phiên này.';
@@ -1255,14 +1277,14 @@
         updateGoogleSheetSyncUI();
         const config = getGoogleSheetSyncConfig();
         if (config.webAppUrl && config.webAppUrl.trim() !== '' && config.autoSync !== false) {
-            console.log('Tự động kiểm tra cập nhật mới nhất từ Database...');
+            console.log('Tự động kiểm tra cập nhật mới nhất từ Google Sheet...');
             syncFromGoogleSheet(false);
         }
     }
 
     function processGoogleSheetData(data) {
         if (!data || data.status !== 'success') {
-            throw new Error((data && data.message) || 'Dữ liệu trả về từ Database không hợp lệ');
+            throw new Error((data && data.message) || 'Dữ liệu trả về từ Google Sheet không hợp lệ');
         }
 
         // 1. Danh mục phí (DM_CPHC)
@@ -1271,7 +1293,12 @@
             ensureCategoryMaterialFlags();
         }
 
-        // 2. Làm sạch hoàn toàn dữ liệu cũ trước khi nạp dữ liệu từ Database
+        // 1b. Danh mục Quản trị - Pháp nhân (DM_QTPN)
+        if (Array.isArray(data.qtpnMappings) && data.qtpnMappings.length > 0) {
+            state.qtpnMappings = data.qtpnMappings;
+        }
+
+        // 2. Làm sạch hoàn toàn dữ liệu cũ trước khi nạp dữ liệu từ Google Sheet
         state.deptData = {};
         state.data2024 = {};
         state.data2025 = {};
@@ -1279,7 +1306,7 @@
         const entityMap = new Map();
 
         const costRows = data.allCostRows || [];
-        console.log(`Đang xử lý ${costRows.length} dòng chi phí từ Database...`);
+        console.log(`Đang xử lý ${costRows.length} dòng chi phí từ Google Sheet...`);
 
         if (costRows.length > 0) {
             costRows.forEach(r => {
@@ -1421,9 +1448,17 @@
             state.data2026 = {};
         }
 
+        // Nhận diện động ranh giới tháng thực tế theo dữ liệu thật vừa nạp từ Google Sheet
+        const detectedActual = detectActualMonthsFromData(costRows);
+        if (isActualYtdMode() || !state.selectedMonths || state.selectedMonths.length === 0) {
+            state.selectedMonths = [...detectedActual];
+            state.selectedPeriod = 'YTD';
+        }
+
         saveCurrentState();
         populateSlicers();
         renderMappingTab();
+        renderPeriodPickerUI();
         renderAll();
     }
 
@@ -1432,7 +1467,7 @@
         if (!config.webAppUrl || !config.webAppUrl.trim()) {
             if (isManual) {
                 openGoogleSheetConfigModal();
-                alert('Vui lòng nhập Web App URL của Google Apps Script để kết nối với Database!');
+                alert('Vui lòng nhập Web App URL của Google Apps Script để kết nối với Google Sheet!');
             }
             return;
         }
@@ -1443,7 +1478,7 @@
         if (btn2) btn2.classList.add('opacity-50', 'pointer-events-none');
 
         try {
-            console.log('Đang kết nối Database Quan_Ly_Chi_Phi...');
+            console.log('Đang kết nối Google Sheet Quan_Ly_Chi_Phi...');
             const keyParam = config.apiKey ? `&api_key=${encodeURIComponent(config.apiKey.trim())}` : '';
             const fetchUrl = config.webAppUrl + (config.webAppUrl.includes('?') ? '&' : '?') + 't=' + Date.now() + keyParam;
 
@@ -1474,7 +1509,7 @@
             // Kiểm tra TRỰC TIẾP nội dung JSON: status === 'error' hoặc code === 401
             if (!data || data.status === 'error' || data.code === 401 || data.code === '401' || data.status !== 'success') {
                 const isKeyError = Boolean(data && (data.code === 401 || data.code === '401' || (data.message && data.message.includes('API_KEY'))));
-                const errMsg = (data && data.message) ? data.message : (isKeyError ? 'Khóa bảo mật API_KEY không hợp lệ hoặc chưa được cung cấp. Vui lòng kiểm tra lại cấu hình kết nối.' : 'Dữ liệu phản hồi từ Database không hợp lệ.');
+                const errMsg = (data && data.message) ? data.message : (isKeyError ? 'Khóa bảo mật API_KEY không hợp lệ hoặc chưa được cung cấp. Vui lòng kiểm tra lại cấu hình kết nối.' : 'Dữ liệu phản hồi từ Google Sheet không hợp lệ.');
                 throw new Error(errMsg);
             }
 
@@ -1488,27 +1523,27 @@
 
                 const costCount = (data.allCostRows || []).length;
                 const catCount = (data.categories || []).length;
-                console.log(`Đã đồng bộ thành công ${catCount} khoản mục và ${costCount} dòng chi phí từ Database!`);
+                console.log(`Đã đồng bộ thành công ${catCount} khoản mục và ${costCount} dòng chi phí từ Google Sheet!`);
 
                 if (isManual) {
                     if (costCount > 0) {
-                        alert(`🎉 ĐỒNG BỘ THÀNH CÔNG TỪ Database!\n- Danh mục phí (DM_CPHC): ${catCount} khoản mục\n- Dữ liệu chi phí thực tế: ${costCount} dòng\n- Pháp nhân: ${state.entities.length} đơn vị\n\nToàn bộ dữ liệu hiển thị hiện được lấy trực tiếp từ file Database!`);
+                        alert(`🎉 ĐỒNG BỘ THÀNH CÔNG TỪ GOOGLE SHEET!\n- Danh mục phí (DM_CPHC): ${catCount} khoản mục\n- Dữ liệu chi phí thực tế: ${costCount} dòng\n- Pháp nhân: ${state.entities.length} đơn vị\n\nToàn bộ dữ liệu hiển thị hiện được lấy trực tiếp từ file Google Sheet!`);
                     } else {
-                        alert(`✅ Đã đồng bộ ${catCount} khoản mục từ Database DM_CPHC!\n\nLưu ý: Các sheet chi phí (CP_AUTO, CP_PP, CP_CTTT) hiện chưa có dữ liệu. Anh/Chị có thể kéo thả file Excel vào tab "Nạp & Chuẩn hóa" để tải chi phí lên Database.`);
+                        alert(`✅ Đã đồng bộ ${catCount} khoản mục từ Google Sheet DM_CPHC!\n\nLưu ý: Các sheet chi phí (CP_AUTO, CP_PP, CP_CTTT) hiện chưa có dữ liệu. Anh/Chị có thể kéo thả file Excel vào tab "Nạp & Chuẩn hóa" để tải chi phí lên Google Sheet.`);
                     }
                 }
             } else {
                 throw new Error(data.message || 'Dữ liệu trả về không hợp lệ');
             }
         } catch (err) {
-            console.error('Lỗi đồng bộ từ Database:', err);
+            console.error('Lỗi đồng bộ từ Google Sheet:', err);
             updateSyncStatusError(err.message);
 
             // Luôn hiển thị banner cảnh báo đỏ nổi bật khi đồng bộ thất bại (không âm thầm rơi về demo)
-            showSyncErrorBanner(`Không thể kết nối tới Database: ${err.message}. Đang hiển thị dữ liệu dự phòng.`);
+            showSyncErrorBanner(`Không thể kết nối tới Google Sheet: ${err.message}. Đang hiển thị dữ liệu dự phòng.`);
 
             if (isManual || isConfiguredFromUrl) {
-                alert(`⚠️ KHÔNG THỂ KẾT NỐI VỚI Database:\n${err.message}\n\nVui lòng kiểm tra lại Web App URL hoặc khóa bảo mật API_KEY trong mục Cài đặt kết nối. Hệ thống đang hiển thị dữ liệu dự phòng.`);
+                alert(`⚠️ KHÔNG THỂ KẾT NỐI VỚI GOOGLE SHEET:\n${err.message}\n\nVui lòng kiểm tra lại Web App URL hoặc khóa bảo mật API_KEY trong mục Cài đặt kết nối. Hệ thống đang hiển thị dữ liệu dự phòng.`);
             }
 
             renderAll();
@@ -1523,7 +1558,7 @@
         if (!config.webAppUrl || !config.webAppUrl.trim()) {
             if (isManual) {
                 openGoogleSheetConfigModal();
-                alert('Vui lòng nhập Web App URL của Google Apps Script để kết nối với Database!');
+                alert('Vui lòng nhập Web App URL của Google Apps Script để kết nối với Google Sheet!');
             }
             return;
         }
@@ -1534,7 +1569,7 @@
         if (btn2) btn2.classList.add('opacity-50', 'pointer-events-none');
 
         try {
-            console.log('Đang đẩy danh mục lên Database DM_CPHC...');
+            console.log('Đang đẩy danh mục lên Google Sheet DM_CPHC...');
             const payload = {
                 action: 'save_categories',
                 api_key: config.apiKey || '',
@@ -1553,17 +1588,17 @@
             if (data.status === 'success') {
                 config.lastSynced = new Date().toISOString();
                 saveGoogleSheetSyncConfig(config);
-                console.log('Đã cập nhật thành công lên Database DM_CPHC:', data.message);
+                console.log('Đã cập nhật thành công lên Google Sheet DM_CPHC:', data.message);
                 if (isManual) {
-                    alert(data.message || 'Đã đồng bộ thành công lên Database DM_CPHC!');
+                    alert(data.message || 'Đã đồng bộ thành công lên Google Sheet DM_CPHC!');
                 }
             } else {
                 throw new Error(data.message || 'Lỗi phản hồi từ Google Apps Script');
             }
         } catch (err) {
-            console.error('Lỗi đẩy dữ liệu lên Database:', err);
+            console.error('Lỗi đẩy dữ liệu lên Google Sheet:', err);
             if (isManual) {
-                alert('Không thể ghi dữ liệu lên Database: ' + err.message);
+                alert('Không thể ghi dữ liệu lên Google Sheet: ' + err.message);
             }
         } finally {
             if (btn1) btn1.classList.remove('opacity-50', 'pointer-events-none');
@@ -1600,7 +1635,7 @@
         saveGoogleSheetSyncConfig(config);
 
         closeGoogleSheetConfigModal();
-        alert('Đã lưu cấu hình kết nối Database thành công!');
+        alert('Đã lưu cấu hình kết nối Google Sheet thành công!');
         if (url) {
             syncFromGoogleSheet(true);
         }
@@ -1651,7 +1686,7 @@
                 resultArea.textContent = `✅ Xác thực kết nối và khóa API_KEY thành công! ${json.message || ''}`;
             } else if (json.status === 'error' || json.code === 401 || json.code === '401') {
                 resultArea.className = 'p-3 rounded-lg border text-xs bg-rose-50 text-rose-800 border-rose-300 font-bold';
-                resultArea.textContent = `❌ Từ chối truy cập (401): ${json.message || 'Khóa API_KEY không chính xác. Vui lòng kiểm tra lại trên Database.'}`;
+                resultArea.textContent = `❌ Từ chối truy cập (401): ${json.message || 'Khóa API_KEY không chính xác. Vui lòng kiểm tra lại trên Google Sheet.'}`;
             } else {
                 resultArea.className = 'p-3 rounded-lg border text-xs bg-rose-50 text-rose-800 border-rose-300 font-bold';
                 resultArea.textContent = `⚠️ Lỗi phản hồi: ${json.message || 'Không xác định'}`;
@@ -1665,7 +1700,7 @@
     function copyAppsScriptCode() {
         if (navigator.clipboard && navigator.clipboard.writeText) {
             navigator.clipboard.writeText(APPS_SCRIPT_SOURCE_CODE).then(() => {
-                alert('Đã sao chép mã nguồn Google Apps Script vào Clipboard!\nAnh/Chị hãy mở Tiện ích mở rộng > Apps Script trong Database và dán vào file Code.gs.');
+                alert('Đã sao chép mã nguồn Google Apps Script vào Clipboard!\nAnh/Chị hãy mở Tiện ích mở rộng > Apps Script trong Google Sheet và dán vào file Code.gs.');
             }).catch(() => {
                 fallbackCopyText(APPS_SCRIPT_SOURCE_CODE);
             });
@@ -1698,7 +1733,7 @@
         const slicerBP = document.getElementById('slicer-bophan');
         if (slicerBP) slicerBP.addEventListener('change', onBoPhanChange);
 
-        // Database Sync Listeners
+        // Google Sheet Sync Listeners
         const btnSyncGSheet = document.getElementById('btn-sync-from-gsheet');
         if (btnSyncGSheet) btnSyncGSheet.addEventListener('click', () => syncFromGoogleSheet(true));
 
@@ -2054,345 +2089,516 @@
     function getMonthItemClass(isActual, isChecked) {
         if (isActual) {
             // Các tháng có số liệu thực tế: viền xanh lá mỏng 1px, nền xanh lá trong suốt nhẹ, chữ đậm vừa, ô tick rõ ràng
-            return `month-chip flex items-center justify-between px-2.5 py-1.5 rounded-lg border text-xs cursor-pointer select-none transition-all ${
-                isChecked
+            return `month-chip flex items-center justify-between px-2.5 py-1.5 rounded-lg border text-xs cursor-pointer select-none transition-all ${isChecked
                     ? 'border-emerald-500/70 bg-emerald-50/70 font-bold text-emerald-950 shadow-2xs'
                     : 'border-slate-200 bg-white text-slate-600 hover:border-emerald-300 hover:bg-emerald-50/20'
-            }`;
+                }`;
         } else {
-            // Các tháng AI dự đoán: viền tím mỏng 1px, nền tím trong suốt nhẹ, icon Google Gemini nhỏ gọn
-            return `month-chip flex items-center justify-between px-2.5 py-1.5 rounded-lg border text-xs cursor-pointer select-none transition-all ${
-                isChecked
+            // Các tháng AI dự báo: viền tím mỏng 1px, nền tím trong suốt nhẹ, icon ngôi sao ✨ nhỏ gọn
+            return `month-chip flex items-center justify-between px-2.5 py-1.5 rounded-lg border text-xs cursor-pointer select-none transition-all ${isChecked
                     ? 'border-purple-400/70 bg-purple-50/70 font-bold text-purple-950 shadow-2xs'
                     : 'border-slate-200 bg-white text-slate-600 hover:border-purple-200 hover:bg-purple-50/20'
-            }`;
+                }`;
         }
     }
 
-    function initMonthSelectorUI() {
-        const container = document.getElementById('month-checkboxes-container') || document.getElementById('month-checkboxes-grid');
-        if (!container) return;
-        container.innerHTML = '';
+    // =========================================================================
+    // 🎛️ UNIFIED REPORT CONTROLS (NĂM, KỲ/THÁNG, CẶP SO SÁNH)
+    // =========================================================================
 
-        const actualMonthsList = state.actualMonths || [1, 2, 3, 4, 5, 6, 7];
-
-        for (let m = 1; m <= 12; m++) {
-            const isActual = actualMonthsList.includes(m);
-            const isChecked = (state.selectedMonths || []).includes(m);
-
-            // Dùng div thay vì label để triệt tiêu hoàn toàn hiện tượng nhấp nháy/synthetic click đôi của trình duyệt
-            const chip = document.createElement('div');
-            chip.className = getMonthItemClass(isActual, isChecked);
-            chip.setAttribute('data-month', String(m));
-
-            const leftDiv = document.createElement('div');
-            leftDiv.className = 'flex items-center gap-1.5 min-w-0 pointer-events-none';
-
-            const input = document.createElement('input');
-            input.type = 'checkbox';
-            input.id = `chk-m-${m}`;
-            input.value = m;
-            input.checked = isChecked;
-            input.className = `w-3.5 h-3.5 rounded border-slate-300 ${isActual ? 'text-emerald-600 focus:ring-emerald-500' : 'text-purple-600 focus:ring-purple-500'} pointer-events-none shrink-0`;
-
-            const span = document.createElement('span');
-            span.className = 'font-mono text-xs font-semibold pointer-events-none';
-            span.textContent = `T${m < 10 ? '0' + m : m}`;
-
-            leftDiv.appendChild(input);
-            leftDiv.appendChild(span);
-            chip.appendChild(leftDiv);
-
-            if (!isActual) {
-                // Icon Google Gemini nhỏ gọn vừa vặn khung
-                const geminiIcon = document.createElement('span');
-                geminiIcon.className = 'ml-1 flex items-center justify-center shrink-0 text-purple-600 p-0.5 pointer-events-none';
-                geminiIcon.title = 'Tháng do AI Gemini dự đoán';
-                geminiIcon.innerHTML = `
-                    <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="currentColor">
-                        <path d="M19 9l1.25-2.75L23 5l-2.75-1.25L19 1l-1.25 2.75L15 5l2.75 1.25L19 9zm-7.5.5L9 4 6.5 9.5 1 12l5.5 2.5L9 20l2.5-5.5L17 12l-5.5-2.5zM19 15l-1.25 2.75L15 19l2.75 1.25L19 23l1.25-2.75L23 19l-2.75-1.25L19 15z"/>
-                    </svg>
-                `;
-                chip.appendChild(geminiIcon);
-            }
-
-            // Xử lý click trực tiếp trên chip: cập nhật tức thời & menu vẫn mở để thao tác liên tục
-            chip.addEventListener('click', (e) => {
-                e.stopPropagation();
-                toggleMonthSelection(m);
-            });
-
-            container.appendChild(chip);
-        }
-    }
-
-    function toggleMonthSelection(m) {
-        const monthNum = parseInt(m, 10);
-        if (!Array.isArray(state.selectedMonths)) {
-            state.selectedMonths = [];
-        }
-        const idx = state.selectedMonths.indexOf(monthNum);
-        if (idx > -1) {
-            state.selectedMonths.splice(idx, 1);
-        } else {
-            state.selectedMonths.push(monthNum);
-        }
-        state.selectedMonths.sort((a, b) => a - b);
-
-        saveCurrentState();
-        syncMonthCheckboxesUI();
-        updateMonthSummaryLabel();
-        renderAll();
-        if (window.CostTooltipEngine) window.CostTooltipEngine.hide();
-    }
-
-    function syncMonthCheckboxesUI() {
-        const container = document.getElementById('month-checkboxes-container') || document.getElementById('month-checkboxes-grid');
-        if (!container) return;
-
-        const actualMonthsList = state.actualMonths || [1, 2, 3, 4, 5, 6, 7];
-        for (let m = 1; m <= 12; m++) {
-            const chip = container.querySelector(`[data-month="${m}"]`);
-            if (!chip) continue;
-            const isActual = actualMonthsList.includes(m);
-            const isChecked = (state.selectedMonths || []).includes(m);
-            const input = chip.querySelector('input');
-            if (input) input.checked = isChecked;
-            chip.className = getMonthItemClass(isActual, isChecked);
-        }
-    }
-
-    function renderCheckboxes() {
-        syncMonthCheckboxesUI();
-    }
-
-    function updateMonthSummaryLabel() {
-        const lbl = document.getElementById('selected-months-summary-label') || document.getElementById('month-picker-summary-label');
-        const badge = document.getElementById('month-selected-count-badge');
-        const sorted = [...(state.selectedMonths || [])].sort((a, b) => a - b);
-        const selCount = sorted.length;
-        if (badge) badge.textContent = `${selCount} tháng`;
-
-        if (!lbl) return;
-        if (selCount === 12) {
-            lbl.textContent = 'Cả năm (T1 - T12)';
-        } else if (selCount === 7 && sorted.every((m, i) => m === i + 1)) {
-            lbl.textContent = 'T1 - T7';
-        } else if (selCount === 0) {
-            lbl.textContent = 'Chưa chọn tháng';
-        } else if (selCount === 1) {
-            lbl.textContent = `Tháng T${sorted[0] < 10 ? '0' + sorted[0] : sorted[0]}`;
-        } else if (sorted.every((m, idx, arr) => idx === 0 || m === arr[idx - 1] + 1)) {
-            lbl.textContent = `T${sorted[0]} - T${sorted[sorted.length - 1]}`;
-        } else {
-            lbl.textContent = sorted.map(m => `T${m}`).join(', ');
-        }
-    }
-
-    function setupMonthPicker() {
-        const btnToggle = document.getElementById('btn-month-picker-toggle') || document.getElementById('btn-month-picker');
-        const menu = document.getElementById('month-picker-menu') || document.getElementById('month-picker-dropdown');
-        const btnSelectAll = document.getElementById('btn-select-all-months');
-        const btnSelectActual = document.getElementById('btn-select-actual-months');
-        const btnDeselectAll = document.getElementById('btn-deselect-all-months');
-        const btnApply = document.getElementById('btn-apply-month-picker');
-
-        if (btnToggle && menu) {
-            btnToggle.addEventListener('click', (e) => {
-                e.stopPropagation();
-                // Đóng menu năm nếu đang mở
-                const yearMenu = document.getElementById('year-picker-menu');
-                if (yearMenu) yearMenu.classList.add('hidden');
-                menu.classList.toggle('hidden');
-            });
-
-            // Ngăn sự kiện click trong dropdown làm tắt dropdown ngoài ý muốn
-            menu.addEventListener('click', (e) => {
-                e.stopPropagation();
-            });
-
-            document.addEventListener('click', (e) => {
-                if (!menu.contains(e.target) && !btnToggle.contains(e.target)) {
-                    menu.classList.add('hidden');
-                }
-            });
-        }
-
-        if (btnSelectAll) {
-            btnSelectAll.addEventListener('click', (e) => {
-                e.stopPropagation();
-                state.selectedMonths = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
-                saveCurrentState();
-                syncMonthCheckboxesUI();
-                updateMonthSummaryLabel();
-                renderAll();
-                if (window.CostTooltipEngine) window.CostTooltipEngine.hide();
-            });
-        }
-
-        if (btnSelectActual) {
-            btnSelectActual.addEventListener('click', (e) => {
-                e.stopPropagation();
-                state.selectedMonths = [...(state.actualMonths || [1, 2, 3, 4, 5, 6, 7])];
-                saveCurrentState();
-                syncMonthCheckboxesUI();
-                updateMonthSummaryLabel();
-                renderAll();
-                if (window.CostTooltipEngine) window.CostTooltipEngine.hide();
-            });
-        }
-
-        if (btnDeselectAll) {
-            btnDeselectAll.addEventListener('click', (e) => {
-                e.stopPropagation();
-                state.selectedMonths = [];
-                saveCurrentState();
-                syncMonthCheckboxesUI();
-                updateMonthSummaryLabel();
-                renderAll();
-                if (window.CostTooltipEngine) window.CostTooltipEngine.hide();
-            });
-        }
-
-        if (btnApply) {
-            btnApply.addEventListener('click', (e) => {
-                e.stopPropagation();
-                if (menu) menu.classList.add('hidden');
-                updateMonthSummaryLabel();
-                renderAll();
-                if (window.CostTooltipEngine) window.CostTooltipEngine.hide();
-            });
-        }
-
-        // Mở rộng / Thu gọn toàn bộ nhóm
-        const btnExp = document.getElementById('btn-expand-all') || document.getElementById('btn-expand-all-groups');
-        if (btnExp) btnExp.addEventListener('click', expandAllGroups);
-
-        const btnCol = document.getElementById('btn-collapse-all') || document.getElementById('btn-collapse-all-groups');
-        if (btnCol) btnCol.addEventListener('click', collapseAllGroups);
-
-        initMonthSelectorUI();
-        syncMonthCheckboxesUI();
-        updateMonthSummaryLabel();
-    }
-
-    // ==========================================
-    // 📅 YEAR COMPARISON PICKER COMPONENT (2025, 2024, Cả 2 năm)
-    // ==========================================
-
-    function setupYearPicker() {
-        const btnToggle = document.getElementById('btn-year-picker-toggle');
-        const menu = document.getElementById('year-picker-menu');
-        const chevron = document.getElementById('icon-year-picker-chevron');
-        const chkShow = document.getElementById('chk-show-compare-col');
-        const btnApply = document.getElementById('btn-apply-year-picker');
-        const radioModes = document.querySelectorAll('input[name="year-compare-mode"]');
-
-        if (btnToggle && menu) {
-            btnToggle.addEventListener('click', (e) => {
-                e.stopPropagation();
-                const isHidden = menu.classList.contains('hidden');
-
-                // Đóng dropdown tháng nếu đang mở
-                const monthMenu = document.getElementById('month-picker-menu');
-                if (monthMenu) monthMenu.classList.add('hidden');
-
-                if (isHidden) {
-                    menu.classList.remove('hidden');
-                    if (chevron) chevron.classList.add('rotate-180');
-                } else {
-                    menu.classList.add('hidden');
-                    if (chevron) chevron.classList.remove('rotate-180');
-                }
-            });
-
-            document.addEventListener('click', (e) => {
-                if (!e.target.closest('#year-picker-wrapper')) {
-                    menu.classList.add('hidden');
-                    if (chevron) chevron.classList.remove('rotate-180');
-                }
-            });
-        }
-
-        if (radioModes && radioModes.length > 0) {
-            radioModes.forEach(radio => {
-                radio.addEventListener('change', (e) => {
-                    if (e.target.checked) {
-                        setCompareYearMode(e.target.value);
-                    }
+    function getAvailableReportYears() {
+        const yearSet = new Set();
+        // Kiểm tra năm từ deptData
+        if (state.deptData) {
+            Object.keys(state.deptData).forEach(entCode => {
+                const entObj = state.deptData[entCode] || {};
+                Object.keys(entObj).forEach(yr => {
+                    const num = parseInt(yr, 10);
+                    if (!isNaN(num) && num > 2000) yearSet.add(num);
                 });
             });
         }
+        // Kiểm tra năm từ data stores
+        if (state.data2026 && Object.keys(state.data2026).length > 0) yearSet.add(2026);
+        if (state.data2025 && Object.keys(state.data2025).length > 0) yearSet.add(2025);
+        if (state.data2024 && Object.keys(state.data2024).length > 0) yearSet.add(2024);
 
-        if (chkShow) {
-            chkShow.addEventListener('change', (e) => {
-                if (!state.compareConfig) state.compareConfig = { mode: '2025', show: true };
-                state.compareConfig.show = e.target.checked;
-                state.columnVisibility.cost2025 = e.target.checked; // Giữ backward compatibility
-                saveCurrentState();
-                updateYearPickerUI();
-                renderTable();
-                if (window.CostTooltipEngine) window.CostTooltipEngine.hide();
-            });
+        if (yearSet.size === 0) {
+            yearSet.add(2026);
+            yearSet.add(2025);
+            yearSet.add(2024);
         }
 
-        if (btnApply && menu) {
-            btnApply.addEventListener('click', () => {
-                menu.classList.add('hidden');
-                if (chevron) chevron.classList.remove('rotate-180');
-            });
+        return Array.from(yearSet).sort((a, b) => b - a); // Giảm dần: [2026, 2025, 2024]
+    }
+
+    function populateReportYearDropdown() {
+        const selectYear = document.getElementById('select-report-year');
+        if (!selectYear) return;
+
+        const years = getAvailableReportYears();
+        const currentYear = state.selectedYear ? parseInt(state.selectedYear, 10) : 2026;
+
+        selectYear.innerHTML = '';
+        years.forEach(yr => {
+            const opt = document.createElement('option');
+            opt.value = String(yr);
+            opt.textContent = (yr === 2026) ? `Năm ${yr} (Hiện tại)` : `Năm ${yr}`;
+            if (yr === currentYear) opt.selected = true;
+            selectYear.appendChild(opt);
+        });
+
+        if (!years.includes(currentYear) && years.length > 0) {
+            state.selectedYear = years[0];
+            selectYear.value = String(years[0]);
+        } else {
+            state.selectedYear = currentYear;
+            selectYear.value = String(currentYear);
         }
     }
 
-    function setCompareYearMode(mode) {
-        if (!state.compareConfig) state.compareConfig = { mode: '2025', show: true };
-        state.compareConfig.mode = mode;
+    function populateCompareYearsDropdown() {
+        const selectComp = document.getElementById('select-compare-years');
+        if (!selectComp) return;
+
+        const years = getAvailableReportYears();
+        selectComp.innerHTML = '';
+
+        if (years.length >= 3) {
+            // Đầy đủ 3 năm
+            const yNew = years[0]; // 2026
+            const yMid = years[1]; // 2025
+            const yOld = years[2]; // 2024
+
+            const optAll = document.createElement('option');
+            optAll.value = `3Y_${yOld}_${yMid}_${yNew}`;
+            optAll.textContent = `3 Năm liên tiếp (${yOld} - ${yMid} - ${yNew}: 3 cặp)`;
+            selectComp.appendChild(optAll);
+
+            const opt1 = document.createElement('option');
+            opt1.value = `2Y_${yMid}_${yNew}`;
+            opt1.textContent = `2 Năm: ${yNew} vs ${yMid} (1 cặp)`;
+            selectComp.appendChild(opt1);
+
+            const opt2 = document.createElement('option');
+            opt2.value = `2Y_${yOld}_${yNew}`;
+            opt2.textContent = `2 Năm: ${yNew} vs ${yOld} (1 cặp)`;
+            selectComp.appendChild(opt2);
+
+            const opt3 = document.createElement('option');
+            opt3.value = `2Y_${yOld}_${yMid}`;
+            opt3.textContent = `2 Năm: ${yMid} vs ${yOld} (1 cặp)`;
+            selectComp.appendChild(opt3);
+        } else if (years.length === 2) {
+            const opt1 = document.createElement('option');
+            opt1.value = `2Y_${years[1]}_${years[0]}`;
+            opt1.textContent = `2 Năm: ${years[0]} vs ${years[1]} (1 cặp)`;
+            selectComp.appendChild(opt1);
+        } else {
+            const opt1 = document.createElement('option');
+            opt1.value = `1Y_${years[0] || 2026}`;
+            opt1.textContent = `Năm ${years[0] || 2026}`;
+            selectComp.appendChild(opt1);
+        }
+
+        if (state.compareSelection && Array.from(selectComp.options).some(o => o.value === state.compareSelection)) {
+            selectComp.value = state.compareSelection;
+        } else {
+            state.compareSelection = selectComp.options[0] ? selectComp.options[0].value : '3Y_2024_2025_2026';
+        }
+    }
+
+    // ==========================================
+    // ⏱️ BỘ CHỌN KỲ MULTI-SELECT & NHẬN DIỆN ĐỘNG RANH GIỚI THỰC TẾ / AI
+    // ==========================================
+
+    function detectActualMonthsFromData(optionalCostRows) {
+        let monthlyTotals = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        let explicitMaxFromKy = 0;
+
+        // A. Kiểm tra từ costRows truyền vào (khi nạp từ Google Sheet)
+        if (Array.isArray(optionalCostRows) && optionalCostRows.length > 0) {
+            optionalCostRows.forEach(r => {
+                const yrStr = String(r['Năm'] || r.year || '').trim();
+                if (yrStr === '2026') {
+                    for (let m = 1; m <= 12; m++) {
+                        const mKey = m < 10 ? ('T0' + m) : ('T' + m);
+                        const val = Math.abs(Number(r[mKey]) || 0);
+                        monthlyTotals[m - 1] += val;
+                    }
+                    const kyStr = String(r['Kỳ Thực Hiện'] || r.ky || '').trim();
+                    const mMatch = kyStr.match(/T\s*(\d+)/gi);
+                    if (mMatch && mMatch.length > 0) {
+                        const lastM = parseInt(mMatch[mMatch.length - 1].replace(/T/i, '').trim(), 10);
+                        if (!isNaN(lastM) && lastM > explicitMaxFromKy && lastM <= 12) {
+                            explicitMaxFromKy = lastM;
+                        }
+                    }
+                }
+            });
+        }
+
+        // B. Kiểm tra từ state.deptData cho năm 2026
+        if (state.deptData && typeof state.deptData === 'object') {
+            Object.keys(state.deptData).forEach(entCode => {
+                const entYears = state.deptData[entCode];
+                const rows26 = (entYears && entYears['2026']) || [];
+                if (Array.isArray(rows26) && rows26.length > 0) {
+                    rows26.forEach(r => {
+                        if (Array.isArray(r.months)) {
+                            for (let m = 0; m < 12; m++) {
+                                monthlyTotals[m] += Math.abs(Number(r.months[m]) || 0);
+                            }
+                        }
+                        const kyStr = String(r.ky || '').trim();
+                        const mMatch = kyStr.match(/T\s*(\d+)/gi);
+                        if (mMatch && mMatch.length > 0) {
+                            const lastM = parseInt(mMatch[mMatch.length - 1].replace(/T/i, '').trim(), 10);
+                            if (!isNaN(lastM) && lastM > explicitMaxFromKy && lastM <= 12) {
+                                explicitMaxFromKy = lastM;
+                            }
+                        }
+                    });
+                }
+            });
+        }
+
+        // C. Kiểm tra từ state.data2026
+        if (state.data2026 && typeof state.data2026 === 'object') {
+            Object.keys(state.data2026).forEach(entCode => {
+                const entObj = state.data2026[entCode];
+                const tkObj = entObj?.['642'] || entObj;
+                if (tkObj && typeof tkObj === 'object') {
+                    Object.keys(tkObj).forEach(catId => {
+                        const mArr = tkObj[catId];
+                        if (Array.isArray(mArr) && mArr.length >= 12) {
+                            for (let m = 0; m < 12; m++) {
+                                monthlyTotals[m] += Math.abs(Number(mArr[m]) || 0);
+                            }
+                        }
+                    });
+                }
+            });
+        }
+
+        // Tìm tháng lớn nhất có tổng chi phí phát sinh hợp lệ (> 1,000 VND)
+        let maxActualMonth = 0;
+        for (let m = 12; m >= 1; m--) {
+            if (monthlyTotals[m - 1] > 1000) {
+                maxActualMonth = m;
+                break;
+            }
+        }
+
+        if (maxActualMonth === 0 && explicitMaxFromKy > 0) {
+            maxActualMonth = explicitMaxFromKy;
+        }
+
+        // Fallback an toàn: tháng 6 (khớp dữ liệu thực tế hiện có của người dùng)
+        if (maxActualMonth <= 0) {
+            maxActualMonth = 6;
+        }
+
+        const detected = [];
+        for (let m = 1; m <= maxActualMonth; m++) {
+            detected.push(m);
+        }
+
+        state.actualMonths = detected;
+        console.log(`[RanhGiớiĐộng] Đã nhận diện ranh giới tháng thực tế Năm 2026: T1 - T${maxActualMonth} (Thực tế: ${detected.join(',')})`);
+        return detected;
+    }
+
+    function isActualYtdMode() {
+        if (state.selectedPeriod === 'YTD') return true;
+        // Các chế độ người dùng đã chủ động chọn riêng biệt:
+        // - 'CUSTOM': Tự tay tick chọn tổ hợp tháng tùy ý
+        // - '12M' hoặc 'ALL': Chọn Cả năm
+        // - 'Q1', 'Q2', 'Q3', 'Q4': Chọn quý
+        // - '1'..'12': Chọn 1 tháng cụ thể
+        const explicitOtherModes = ['CUSTOM', '12M', 'ALL', 'Q1', 'Q2', 'Q3', 'Q4'];
+        if (explicitOtherModes.includes(String(state.selectedPeriod))) return false;
+        if (/^\d+$/.test(String(state.selectedPeriod || ''))) return false;
+        // Mặc định hoặc phiên cũ: Coi như đang ở chế độ Lũy kế thực tế
+        return true;
+    }
+
+    function isContiguousSequence(arr) {
+        if (!Array.isArray(arr) || arr.length <= 1) return true;
+        const sorted = [...arr].sort((a, b) => a - b);
+        for (let i = 1; i < sorted.length; i++) {
+            if (sorted[i] !== sorted[i - 1] + 1) return false;
+        }
+        return true;
+    }
+
+    function renderPeriodPickerUI() {
+        const lblSummary = document.getElementById('lbl-period-summary');
+        const lblCount = document.getElementById('lbl-selected-month-count');
+        const lblQuickYtd = document.getElementById('lbl-btn-quick-ytd');
+        const grid = document.getElementById('month-checkboxes-grid');
+
+        const activeYear = parseInt(state.selectedYear, 10) || 2026;
+        const isCurrentYear = (activeYear === 2026);
+        const actualList = state.actualMonths || [1, 2, 3, 4, 5, 6];
+        const maxActual = actualList.length > 0 ? Math.max(...actualList) : 6;
+
+        // Đảm bảo selectedMonths luôn hợp lệ, không rỗng
+        if (!Array.isArray(state.selectedMonths) || state.selectedMonths.length === 0) {
+            state.selectedMonths = isCurrentYear ? [...actualList] : [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+        }
+
+        const sortedSel = [...state.selectedMonths].sort((a, b) => a - b);
+        const selCount = sortedSel.length;
+
+        // 1. Cập nhật nhãn tóm tắt hiển thị trên trigger button
+        if (lblSummary) {
+            if (selCount === 12) {
+                lblSummary.textContent = 'Cả năm (12T)';
+            } else if (selCount === 1) {
+                const m = sortedSel[0];
+                const isAi = (isCurrentYear && !actualList.includes(m));
+                lblSummary.textContent = `Tháng ${m}${isAi ? ' ✨' : ''}`;
+            } else {
+                const isExactActual = isCurrentYear && (isActualYtdMode() || (selCount === actualList.length && sortedSel.every(m => actualList.includes(m))));
+                if (isExactActual) {
+                    lblSummary.textContent = `Lũy kế T1 - T${maxActual}`;
+                } else if (isContiguousSequence(sortedSel)) {
+                    lblSummary.textContent = `Lũy kế T${sortedSel[0]} - T${sortedSel[sortedSel.length - 1]}`;
+                } else {
+                    lblSummary.textContent = `${selCount} tháng (T${sortedSel.join(', T')})`;
+                }
+            }
+        }
+
+        // 2. Cập nhật số tháng đã chọn
+        if (lblCount) {
+            lblCount.textContent = `Đã chọn ${selCount} tháng`;
+        }
+
+        // 3. Cập nhật nút chọn nhanh Lũy kế T1-T[N]
+        if (lblQuickYtd) {
+            lblQuickYtd.textContent = `📅 Lũy kế T1-T${maxActual}`;
+        }
+
+        // 4. Render 12 ô checkbox tháng trong Popover
+        if (grid) {
+            grid.innerHTML = '';
+            for (let m = 1; m <= 12; m++) {
+                const isActual = !isCurrentYear || actualList.includes(m);
+                const isChecked = sortedSel.includes(m);
+                const isAi = !isActual && isCurrentYear;
+
+                const card = document.createElement('label');
+                card.className = `flex items-center justify-between px-2 py-1.5 rounded-lg border cursor-pointer transition-all ${
+                    isChecked
+                        ? (isAi ? 'bg-sky-50 border-sky-400 text-sky-950 font-bold shadow-2xs' : 'bg-blue-50 border-[#00529C] text-[#00529C] font-black shadow-2xs')
+                        : 'bg-white border-slate-200 text-slate-700 hover:border-slate-300'
+                }`;
+
+                card.innerHTML = `
+                    <div class="flex items-center gap-1.5">
+                        <input type="checkbox" value="${m}" ${isChecked ? 'checked' : ''}
+                            class="month-picker-chk w-3.5 h-3.5 text-[#00529C] rounded border-slate-300 focus:ring-[#00529C] cursor-pointer">
+                        <span class="text-xs">T${m}</span>
+                    </div>
+                    ${isAi ? '<span class="text-[9px] px-1 py-0.2 bg-cyan-100 text-cyan-800 rounded font-semibold" title="Tháng AI dự phóng">✨ AI</span>' : ''}
+                `;
+
+                const chk = card.querySelector('input');
+                chk.addEventListener('change', (e) => {
+                    e.stopPropagation();
+                    toggleMonthSelection(m);
+                });
+
+                grid.appendChild(card);
+            }
+        }
+    }
+
+    function toggleMonthSelection(month) {
+        if (!Array.isArray(state.selectedMonths)) {
+            state.selectedMonths = [...(state.actualMonths || [1, 2, 3, 4, 5, 6])];
+        }
+
+        const idx = state.selectedMonths.indexOf(month);
+        if (idx >= 0) {
+            // Giữ tối thiểu 1 tháng, không để rỗng
+            if (state.selectedMonths.length === 1) {
+                alert('Vui lòng chọn ít nhất 1 tháng để xem báo cáo!');
+                renderPeriodPickerUI();
+                return;
+            }
+            state.selectedMonths.splice(idx, 1);
+        } else {
+            state.selectedMonths.push(month);
+        }
+
+        state.selectedMonths.sort((a, b) => a - b);
+        state.selectedPeriod = (state.selectedMonths.length === 12)
+            ? '12M'
+            : (state.selectedMonths.length === 1 ? String(state.selectedMonths[0]) : 'CUSTOM');
+
+        clearReportDataCache();
         saveCurrentState();
-        updateYearPickerUI();
+        renderPeriodPickerUI();
         renderTable();
-        renderDashboardCharts();
         if (window.CostTooltipEngine) window.CostTooltipEngine.hide();
     }
 
-    function updateYearPickerUI() {
-        if (!state.compareConfig) state.compareConfig = { mode: '2025', show: true };
-        const label = document.getElementById('selected-year-summary-label');
-        const badge = document.getElementById('badge-col-year-status');
-        const chkShow = document.getElementById('chk-show-compare-col');
-
-        const mode = state.compareConfig.mode || '2025';
-        const isShow = state.compareConfig.show !== false;
-
-        if (chkShow) chkShow.checked = isShow;
-        if (badge) {
-            badge.className = isShow ? 'w-2 h-2 rounded-full bg-emerald-500 shrink-0' : 'w-2 h-2 rounded-full bg-slate-400 shrink-0';
+    function setQuickPeriod(type) {
+        const actualList = state.actualMonths || [1, 2, 3, 4, 5, 6];
+        if (type === 'YTD') {
+            state.selectedMonths = [...actualList];
+            state.selectedPeriod = 'YTD';
+        } else if (type === '12M') {
+            state.selectedMonths = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+            state.selectedPeriod = '12M';
+        } else if (type === 'Q1') {
+            state.selectedMonths = [1, 2, 3];
+            state.selectedPeriod = 'Q1';
+        } else if (type === 'Q2') {
+            state.selectedMonths = [4, 5, 6];
+            state.selectedPeriod = 'Q2';
+        } else if (type === 'Q3') {
+            state.selectedMonths = [7, 8, 9];
+            state.selectedPeriod = 'Q3';
+        } else if (type === 'Q4') {
+            state.selectedMonths = [10, 11, 12];
+            state.selectedPeriod = 'Q4';
+        } else if (type === 'CLEAR') {
+            state.selectedMonths = [actualList[0] || 1];
+            state.selectedPeriod = String(actualList[0] || 1);
         }
 
-        if (label) {
-            if (!isShow) {
-                label.textContent = 'Đang ẩn cột';
-            } else if (mode === '2025') {
-                label.textContent = 'Năm 2025';
-            } else if (mode === '2024') {
-                label.textContent = 'Năm 2024';
-            } else if (mode === 'BOTH') {
-                label.textContent = 'Cả 2 năm (2024 & 2025)';
-            }
-        }
+        clearReportDataCache();
+        saveCurrentState();
+        renderPeriodPickerUI();
+        renderTable();
+        if (window.CostTooltipEngine) window.CostTooltipEngine.hide();
+    }
 
-        // Cập nhật trạng thái radio & style nổi bật của dòng được chọn
-        document.querySelectorAll('input[name="year-compare-mode"]').forEach(r => {
-            r.checked = (r.value === mode);
-            const parentItem = r.closest('.option-year-item');
-            if (parentItem) {
-                if (r.value === mode) {
-                    parentItem.className = 'flex items-center justify-between p-2 rounded-lg border border-blue-300 bg-blue-50/70 font-bold cursor-pointer transition-all option-year-item';
+    function initPeriodPickerUI() {
+        const trigger = document.getElementById('btn-period-picker-trigger');
+        const popover = document.getElementById('period-picker-popover');
+        const chevron = document.getElementById('icon-period-chevron');
+        const btnClose = document.getElementById('btn-close-period-picker');
+        const btnYtd = document.getElementById('btn-quick-ytd');
+        const btnAll = document.getElementById('btn-quick-fullyear');
+        const btnClear = document.getElementById('btn-clear-all-months');
+
+        if (trigger && popover) {
+            trigger.onclick = (e) => {
+                e.stopPropagation();
+                const isHidden = popover.classList.contains('hidden');
+                const container = document.getElementById('period-picker-container');
+                if (isHidden) {
+                    popover.classList.remove('hidden');
+                    if (chevron) chevron.classList.add('rotate-180');
+                    if (container) container.style.zIndex = '99999';
+                    renderPeriodPickerUI();
+                    if (window.CostTooltipEngine) window.CostTooltipEngine.hide();
                 } else {
-                    parentItem.className = 'flex items-center justify-between p-2 rounded-lg border border-slate-200 hover:bg-slate-50 cursor-pointer transition-all option-year-item';
+                    popover.classList.add('hidden');
+                    if (chevron) chevron.classList.remove('rotate-180');
+                    if (container) container.style.zIndex = '';
                 }
+            };
+        }
+
+        if (btnClose && popover) {
+            btnClose.onclick = (e) => {
+                e.stopPropagation();
+                popover.classList.add('hidden');
+                if (chevron) chevron.classList.remove('rotate-180');
+                const container = document.getElementById('period-picker-container');
+                if (container) container.style.zIndex = '';
+            };
+        }
+
+        // Đóng popover khi click ra ngoài
+        document.addEventListener('click', (e) => {
+            const container = document.getElementById('period-picker-container');
+            if (container && !container.contains(e.target) && popover && !popover.classList.contains('hidden')) {
+                popover.classList.add('hidden');
+                if (chevron) chevron.classList.remove('rotate-180');
+                container.style.zIndex = '';
             }
         });
+
+        if (btnYtd) btnYtd.onclick = () => setQuickPeriod('YTD');
+        if (btnAll) btnAll.onclick = () => setQuickPeriod('12M');
+        if (btnClear) btnClear.onclick = () => setQuickPeriod('CLEAR');
+
+        document.querySelectorAll('.btn-quick-quarter').forEach(btn => {
+            btn.onclick = () => {
+                const q = btn.dataset.quarter;
+                setQuickPeriod(`Q${q}`);
+            };
+        });
     }
+
+    function initUnifiedReportControls() {
+        populateReportYearDropdown();
+        populateCompareYearsDropdown();
+        initPeriodPickerUI();
+        renderPeriodPickerUI();
+
+        // 1. Event listener cho Năm xem
+        const selectYear = document.getElementById('select-report-year');
+        if (selectYear) {
+            selectYear.value = String(state.selectedYear || 2026);
+            selectYear.onchange = (e) => {
+                const yr = parseInt(e.target.value, 10);
+                state.selectedYear = yr;
+                renderPeriodPickerUI();
+                clearReportDataCache();
+                saveCurrentState();
+                renderTable();
+                if (window.CostTooltipEngine) window.CostTooltipEngine.hide();
+            };
+        }
+
+        // 2. Event listener cho Cặp so sánh
+        const selectComp = document.getElementById('select-compare-years');
+        if (selectComp) {
+            if (state.compareSelection) selectComp.value = state.compareSelection;
+            selectComp.onchange = (e) => {
+                state.compareSelection = e.target.value;
+                if (!state.compareConfig) state.compareConfig = { mode: '2025', show: true };
+                if (e.target.value.includes('2024_2025_2026')) {
+                    state.compareConfig.mode = 'BOTH';
+                } else if (e.target.value.includes('2024_2026')) {
+                    state.compareConfig.mode = '2024';
+                } else if (e.target.value.includes('2024_2025')) {
+                    state.compareConfig.mode = '2024';
+                } else {
+                    state.compareConfig.mode = '2025';
+                }
+                clearReportDataCache();
+                saveCurrentState();
+                renderTable();
+                if (window.CostTooltipEngine) window.CostTooltipEngine.hide();
+            };
+        }
+
+        // 3. Mở rộng / Thu gọn tất cả
+        const btnExp = document.getElementById('btn-expand-all');
+        if (btnExp) btnExp.onclick = expandAllGroups;
+
+        const btnCol = document.getElementById('btn-collapse-all');
+        if (btnCol) btnCol.onclick = collapseAllGroups;
+    }
+
+    // Các hàm tương thích ngược an toàn
+    function syncMonthCheckboxesUI() {
+        renderPeriodPickerUI();
+    }
+
+    function updateMonthSummaryLabel() {
+        renderPeriodPickerUI();
+    }
+
 
 
 
@@ -2647,6 +2853,9 @@
         const filters = customFilters || state.filters;
         const cacheKey = JSON.stringify({
             filters: filters,
+            year: state.selectedYear,
+            period: state.selectedPeriod,
+            selectedMonths: state.selectedMonths,
             actualMonths: state.actualMonths,
             compareConfig: state.compareConfig,
             catCount: (state.categories || []).length,
@@ -2689,7 +2898,7 @@
                         }
                     });
                 }
-                
+
                 if (!entDeptMatched) {
                     const dataSource = yearStr === '2025' ? state.data2025 : (yearStr === '2024' ? state.data2024 : null);
                     if (dataSource && dataSource[entCode]) {
@@ -2715,8 +2924,8 @@
                     const dRows = state.deptData[entCode]['2026'];
                     dRows.forEach(r => {
                         const isCat = (r.catId !== undefined && r.catId === cat.id) ||
-                                      matchCategoryKm(cat, r.km) ||
-                                      (r.km && cat.id && String(r.km) === String(cat.id));
+                            matchCategoryKm(cat, r.km) ||
+                            (r.km && cat.id && String(r.km) === String(cat.id));
                         if (isCat && matchDeptFilter(r.bp, r.tenBp)) {
                             entDeptMatched = true;
                             actualMonths.forEach(m => {
@@ -2725,7 +2934,7 @@
                         }
                     });
                 }
-                
+
                 if (!entDeptMatched && state.data2026 && state.data2026[entCode]) {
                     const entTkData = state.data2026[entCode];
                     if (Array.isArray(entTkData[catIdStr])) {
@@ -2831,31 +3040,48 @@
         const isYoY = state.yoyConfig && state.yoyConfig.viewMode === 'YOY_TABLE';
         const btnMonthly = document.getElementById('btn-view-mode-monthly');
         const btnYoY = document.getElementById('btn-view-mode-yoy');
-        const yearPickerWrap = document.getElementById('year-picker-wrapper');
-        const monthPickerWrap = document.getElementById('month-picker-wrapper');
+        const compareYearsWrap = document.getElementById('compare-years-selector-wrapper');
         const inputThreshold = document.getElementById('input-yoy-threshold');
 
         if (inputThreshold && state.yoyConfig) {
             inputThreshold.value = state.yoyConfig.thresholdPercent || 20;
         }
 
+        if (compareYearsWrap) {
+            if (isYoY) {
+                compareYearsWrap.classList.remove('hidden');
+            } else {
+                compareYearsWrap.classList.add('hidden');
+            }
+        }
+
         if (btnMonthly && btnYoY) {
             if (isYoY) {
                 btnMonthly.className = 'px-2.5 py-1 text-xs font-medium rounded-lg bg-white text-slate-700 hover:bg-slate-50 border border-slate-200 transition-all flex items-center gap-1';
                 btnYoY.className = 'px-2.5 py-1 text-xs font-bold rounded-lg bg-[#00529C] text-white shadow-sm transition-all flex items-center gap-1';
-                if (yearPickerWrap) yearPickerWrap.classList.add('hidden');
-                if (monthPickerWrap) monthPickerWrap.classList.add('hidden');
             } else {
                 btnMonthly.className = 'px-2.5 py-1 text-xs font-bold rounded-lg bg-[#00529C] text-white shadow-sm transition-all flex items-center gap-1';
                 btnYoY.className = 'px-2.5 py-1 text-xs font-medium rounded-lg bg-white text-slate-700 hover:bg-slate-50 border border-slate-200 transition-all flex items-center gap-1';
-                if (yearPickerWrap) yearPickerWrap.classList.remove('hidden');
-                if (monthPickerWrap) monthPickerWrap.classList.remove('hidden');
             }
         }
     }
 
     function renderYoYTableContent(grouped, displayRows, tbody) {
         const threshold = (state.yoyConfig && state.yoyConfig.thresholdPercent) || 20;
+        const selectedMonths = (state.selectedMonths && state.selectedMonths.length > 0)
+            ? state.selectedMonths
+            : (state.actualMonths || [1, 2, 3, 4, 5, 6]);
+
+        function getRowYearVal(row, yr) {
+            if (selectedMonths.length === 12) {
+                if (yr === 2026) return row.fullYear2026 || 0;
+                if (yr === 2025) return row.total2025 || 0;
+                if (yr === 2024) return row.total2024 || 0;
+            }
+            const mArr = (yr === 2026) ? row.monthly2026 : ((yr === 2025) ? row.monthly2025 : row.monthly2024);
+            if (!mArr) return 0;
+            return selectedMonths.reduce((sum, m) => sum + (mArr[m - 1] || 0), 0);
+        }
 
         function renderYoYMetricCells(vNew, vOld, isHeaderOrTotal = false) {
             const diff = vNew - vOld;
@@ -2902,9 +3128,9 @@
 
             let grp2024 = 0, grp2025 = 0, grp2026 = 0;
             rows.forEach(r => {
-                grp2024 += (r.total2024 || 0);
-                grp2025 += (r.total2025 || 0);
-                grp2026 += (r.fullYear2026 || 0);
+                grp2024 += getRowYearVal(r, 2024);
+                grp2025 += getRowYearVal(r, 2025);
+                grp2026 += getRowYearVal(r, 2026);
             });
 
             grand2024 += grp2024;
@@ -2914,6 +3140,44 @@
             const grp26_25 = renderYoYMetricCells(grp2026, grp2025, true);
             const grp26_24 = renderYoYMetricCells(grp2026, grp2024, true);
             const grp25_24 = renderYoYMetricCells(grp2025, grp2024, true);
+
+            const compSel = state.compareSelection || '3Y_2024_2025_2026';
+
+            let grpYearCells = '';
+            if (compSel === '2Y_2025_2026') {
+                grpYearCells = `
+                    <td class="p-2 text-right border-r border-amber-200/80 font-mono text-sky-900 bg-sky-50/50">${formatNumber(grp2025)}</td>
+                    <td class="p-2 text-right border-r border-amber-200/80 font-mono text-emerald-950 font-black bg-emerald-100/70">${formatNumber(grp2026)}</td>
+                    ${grp26_25.diffHtml}
+                    ${grp26_25.pctHtml}
+                `;
+            } else if (compSel === '2Y_2024_2026') {
+                grpYearCells = `
+                    <td class="p-2 text-right border-r border-amber-200/80 font-mono text-purple-900 bg-purple-50/50">${formatNumber(grp2024)}</td>
+                    <td class="p-2 text-right border-r border-amber-200/80 font-mono text-emerald-950 font-black bg-emerald-100/70">${formatNumber(grp2026)}</td>
+                    ${grp26_24.diffHtml}
+                    ${grp26_24.pctHtml}
+                `;
+            } else if (compSel === '2Y_2024_2025') {
+                grpYearCells = `
+                    <td class="p-2 text-right border-r border-amber-200/80 font-mono text-purple-900 bg-purple-50/50">${formatNumber(grp2024)}</td>
+                    <td class="p-2 text-right border-r border-amber-200/80 font-mono text-sky-900 bg-sky-50/50">${formatNumber(grp2025)}</td>
+                    ${grp25_24.diffHtml}
+                    ${grp25_24.pctHtml}
+                `;
+            } else {
+                grpYearCells = `
+                    <td class="p-2 text-right border-r border-amber-200/80 font-mono text-purple-900 bg-purple-50/50">${formatNumber(grp2024)}</td>
+                    <td class="p-2 text-right border-r border-amber-200/80 font-mono text-sky-900 bg-sky-50/50">${formatNumber(grp2025)}</td>
+                    <td class="p-2 text-right border-r border-amber-200/80 font-mono text-emerald-950 font-black bg-emerald-100/70">${formatNumber(grp2026)}</td>
+                    ${grp26_25.diffHtml}
+                    ${grp26_25.pctHtml}
+                    ${grp26_24.diffHtml}
+                    ${grp26_24.pctHtml}
+                    ${grp25_24.diffHtml}
+                    ${grp25_24.pctHtml}
+                `;
+            }
 
             // Group Header Row
             const grpTr = document.createElement('tr');
@@ -2925,15 +3189,7 @@
                 <td colspan="3" class="p-2 text-left text-[#00529C] border-r border-amber-200/80 font-extrabold text-xs cursor-pointer" data-action="toggle-collapse">
                     <span>${(window.getGroupIcon ? window.getGroupIcon(grpName) : '📑')} ${escapeHtml(grpName)} (${rows.length} khoản mục)</span>
                 </td>
-                <td class="p-2 text-right border-r border-amber-200/80 font-mono text-purple-900 bg-purple-50/50">${formatNumber(grp2024)}</td>
-                <td class="p-2 text-right border-r border-amber-200/80 font-mono text-sky-900 bg-sky-50/50">${formatNumber(grp2025)}</td>
-                <td class="p-2 text-right border-r border-amber-200/80 font-mono text-emerald-950 font-black bg-emerald-100/70">${formatNumber(grp2026)}</td>
-                ${grp26_25.diffHtml}
-                ${grp26_25.pctHtml}
-                ${grp26_24.diffHtml}
-                ${grp26_24.pctHtml}
-                ${grp25_24.diffHtml}
-                ${grp25_24.pctHtml}
+                ${grpYearCells}
                 <td class="p-1.5 text-center border-r border-amber-200/80">
                     <button class="btn-yoy-drilldown px-1.5 py-0.5 bg-amber-200 hover:bg-amber-300 text-[#00529C] rounded font-bold text-[10px] w-full transition-all" data-group-name="${escapeHtml(grpName)}">
                         🔍 Nhóm
@@ -2957,11 +3213,51 @@
                     const tr = document.createElement('tr');
                     tr.className = `text-xs border-b border-slate-200 hover:bg-blue-50/50 transition-colors ${r.category.is_material ? 'bg-amber-50/40' : 'bg-white'}`;
 
-                    const item26_25 = renderYoYMetricCells(r.fullYear2026, r.total2025);
-                    const item26_24 = renderYoYMetricCells(r.fullYear2026, r.total2024);
-                    const item25_24 = renderYoYMetricCells(r.total2025, r.total2024);
+                    const itemV24 = getRowYearVal(r, 2024);
+                    const itemV25 = getRowYearVal(r, 2025);
+                    const itemV26 = getRowYearVal(r, 2026);
+
+                    const item26_25 = renderYoYMetricCells(itemV26, itemV25);
+                    const item26_24 = renderYoYMetricCells(itemV26, itemV24);
+                    const item25_24 = renderYoYMetricCells(itemV25, itemV24);
 
                     const starIcon = r.category.is_material ? '<span class="text-amber-500 font-black mr-1" title="Khoản mục trọng yếu">⭐</span>' : '';
+
+                    let itemYearCells = '';
+                    if (compSel === '2Y_2025_2026') {
+                        itemYearCells = `
+                            <td class="p-2 text-right border-r border-slate-200 font-mono text-sky-900 bg-sky-50/30 font-medium">${formatNumber(itemV25)}</td>
+                            <td class="p-2 text-right border-r border-slate-200 font-mono text-[#00529C] bg-blue-50/40 font-bold">${formatNumber(itemV26)}</td>
+                            ${item26_25.diffHtml}
+                            ${item26_25.pctHtml}
+                        `;
+                    } else if (compSel === '2Y_2024_2026') {
+                        itemYearCells = `
+                            <td class="p-2 text-right border-r border-slate-200 font-mono text-purple-900 bg-purple-50/30 font-medium">${formatNumber(itemV24)}</td>
+                            <td class="p-2 text-right border-r border-slate-200 font-mono text-[#00529C] bg-blue-50/40 font-bold">${formatNumber(itemV26)}</td>
+                            ${item26_24.diffHtml}
+                            ${item26_24.pctHtml}
+                        `;
+                    } else if (compSel === '2Y_2024_2025') {
+                        itemYearCells = `
+                            <td class="p-2 text-right border-r border-slate-200 font-mono text-purple-900 bg-purple-50/30 font-medium">${formatNumber(itemV24)}</td>
+                            <td class="p-2 text-right border-r border-slate-200 font-mono text-sky-900 bg-sky-50/30 font-medium">${formatNumber(itemV25)}</td>
+                            ${item25_24.diffHtml}
+                            ${item25_24.pctHtml}
+                        `;
+                    } else {
+                        itemYearCells = `
+                            <td class="p-2 text-right border-r border-slate-200 font-mono text-purple-900 bg-purple-50/30 font-medium">${formatNumber(itemV24)}</td>
+                            <td class="p-2 text-right border-r border-slate-200 font-mono text-sky-900 bg-sky-50/30 font-medium">${formatNumber(itemV25)}</td>
+                            <td class="p-2 text-right border-r border-slate-200 font-mono text-[#00529C] bg-blue-50/40 font-bold">${formatNumber(itemV26)}</td>
+                            ${item26_25.diffHtml}
+                            ${item26_25.pctHtml}
+                            ${item26_24.diffHtml}
+                            ${item26_24.pctHtml}
+                            ${item25_24.diffHtml}
+                            ${item25_24.pctHtml}
+                        `;
+                    }
 
                     tr.innerHTML = `
                         <td class="p-2 text-center text-slate-500 border-r border-slate-200 font-mono sticky-col-1 bg-white">${stt++}</td>
@@ -2970,15 +3266,7 @@
                         <td class="p-2 text-left font-semibold text-slate-800 border-r border-slate-200 pl-3 sticky-col-4 bg-white">
                             ${starIcon}<span>${escapeHtml(r.category.name)}</span>
                         </td>
-                        <td class="p-2 text-right border-r border-slate-200 font-mono text-purple-900 bg-purple-50/30 font-medium">${formatNumber(r.total2024)}</td>
-                        <td class="p-2 text-right border-r border-slate-200 font-mono text-sky-900 bg-sky-50/30 font-medium">${formatNumber(r.total2025)}</td>
-                        <td class="p-2 text-right border-r border-slate-200 font-mono text-[#00529C] bg-blue-50/40 font-bold">${formatNumber(r.fullYear2026)}</td>
-                        ${item26_25.diffHtml}
-                        ${item26_25.pctHtml}
-                        ${item26_24.diffHtml}
-                        ${item26_24.pctHtml}
-                        ${item25_24.diffHtml}
-                        ${item25_24.pctHtml}
+                        ${itemYearCells}
                         <td class="p-1.5 text-center border-r border-slate-200">
                             <button class="btn-yoy-drilldown px-2 py-1 bg-blue-50 hover:bg-blue-100 text-[#00529C] rounded border border-blue-200 text-[11px] font-bold shadow-sm transition-all flex items-center justify-center gap-1 w-full" data-cat-id="${r.category.id}">
                                 🔍 Đơn vị
@@ -2995,27 +3283,56 @@
         const grand26_24 = renderYoYMetricCells(grand2026, grand2024, true);
         const grand25_24 = renderYoYMetricCells(grand2025, grand2024, true);
 
+        const compSel = state.compareSelection || '3Y_2024_2025_2026';
+        let grandYearCells = '';
+        if (compSel === '2Y_2025_2026') {
+            grandYearCells = `
+                <td class="p-2.5 text-right border-r border-blue-800 font-mono text-cyan-200 bg-blue-950/40">${formatNumber(grand2025)}</td>
+                <td class="p-2.5 text-right border-r border-blue-800 font-mono text-amber-200 font-black bg-emerald-950/50">${formatNumber(grand2026)}</td>
+                ${grand26_25.diffHtml}
+                ${grand26_25.pctHtml}
+            `;
+        } else if (compSel === '2Y_2024_2026') {
+            grandYearCells = `
+                <td class="p-2.5 text-right border-r border-blue-800 font-mono text-purple-200 bg-purple-950/40">${formatNumber(grand2024)}</td>
+                <td class="p-2.5 text-right border-r border-blue-800 font-mono text-amber-200 font-black bg-emerald-950/50">${formatNumber(grand2026)}</td>
+                ${grand26_24.diffHtml}
+                ${grand26_24.pctHtml}
+            `;
+        } else if (compSel === '2Y_2024_2025') {
+            grandYearCells = `
+                <td class="p-2.5 text-right border-r border-blue-800 font-mono text-purple-200 bg-purple-950/40">${formatNumber(grand2024)}</td>
+                <td class="p-2.5 text-right border-r border-blue-800 font-mono text-cyan-200 bg-blue-950/40">${formatNumber(grand2025)}</td>
+                ${grand25_24.diffHtml}
+                ${grand25_24.pctHtml}
+            `;
+        } else {
+            grandYearCells = `
+                <td class="p-2.5 text-right border-r border-blue-800 font-mono text-purple-200 bg-purple-950/40">${formatNumber(grand2024)}</td>
+                <td class="p-2.5 text-right border-r border-blue-800 font-mono text-cyan-200 bg-blue-950/40">${formatNumber(grand2025)}</td>
+                <td class="p-2.5 text-right border-r border-blue-800 font-mono text-amber-200 font-black bg-emerald-950/50">${formatNumber(grand2026)}</td>
+                ${grand26_25.diffHtml}
+                ${grand26_25.pctHtml}
+                ${grand26_24.diffHtml}
+                ${grand26_24.pctHtml}
+                ${grand25_24.diffHtml}
+                ${grand25_24.pctHtml}
+            `;
+        }
+
         const footerTr = document.createElement('tr');
         footerTr.className = 'bg-[#003870] text-white font-black text-xs border-t-2 border-blue-900 select-none';
         footerTr.innerHTML = `
             <td colspan="4" class="p-2.5 text-center uppercase tracking-wider font-extrabold border-r border-blue-800 sticky-col-1 bg-[#003870]">
                 TỔNG CỘNG CHI PHÍ TOÀN BỘ
             </td>
-            <td class="p-2.5 text-right border-r border-blue-800 font-mono text-purple-200 bg-purple-950/40">${formatNumber(grand2024)}</td>
-            <td class="p-2.5 text-right border-r border-blue-800 font-mono text-cyan-200 bg-blue-950/40">${formatNumber(grand2025)}</td>
-            <td class="p-2.5 text-right border-r border-blue-800 font-mono text-amber-200 font-black bg-emerald-950/50">${formatNumber(grand2026)}</td>
-            ${grand26_25.diffHtml}
-            ${grand26_25.pctHtml}
-            ${grand26_24.diffHtml}
-            ${grand26_24.pctHtml}
-            ${grand25_24.diffHtml}
-            ${grand25_24.pctHtml}
+            ${grandYearCells}
             <td class="p-2.5 text-center border-r border-blue-800 font-mono text-slate-300">-</td>
         `;
         tbody.appendChild(footerTr);
 
         // Delegated click on tbody for drilldown buttons
-        tbody.onclick = function(e) {
+        tbody.onclick = function (e) {
             const btn = e.target.closest('.btn-yoy-drilldown');
             if (!btn) return;
             const catIdAttr = btn.getAttribute('data-cat-id');
@@ -3047,153 +3364,314 @@
         const thead = document.getElementById('report-table-head') || document.getElementById('report-table-header');
         if (!thead) return;
 
-        // Chế độ xem: Bảng Phân tích So sánh Cùng kỳ (YoY 3 Năm: 2024, 2025, 2026)
+        const activeYear = state.selectedYear ? parseInt(state.selectedYear, 10) : 2026;
+        const isCurrentYear = (activeYear === 2026);
+        const actualMonthsList = isCurrentYear ? (state.actualMonths || [1, 2, 3, 4, 5, 6]) : [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+        const maxActual = actualMonthsList.length > 0 ? Math.max(...actualMonthsList) : 6;
+        const selectedMonths = (state.selectedMonths && state.selectedMonths.length > 0)
+            ? [...state.selectedMonths].sort((a, b) => a - b)
+            : [...actualMonthsList];
+        const selCount = selectedMonths.length;
+
+        // Mô tả chu kỳ đang chọn
+        let periodDesc = '';
+        if (selCount === 12) {
+            periodDesc = 'Cả năm';
+        } else if (selCount === 1) {
+            periodDesc = `Tháng ${selectedMonths[0]}`;
+        } else if (isCurrentYear && selCount === actualMonthsList.length && selectedMonths.every(m => actualMonthsList.includes(m))) {
+            periodDesc = `Lũy kế T1-T${maxActual}`;
+        } else if (isContiguousSequence(selectedMonths)) {
+            periodDesc = `Lũy kế T${selectedMonths[0]}-T${selectedMonths[selectedMonths.length - 1]}`;
+        } else {
+            periodDesc = `Lũy kế ${selCount} tháng`;
+        }
+
+        const hasAiInSel = isCurrentYear && selectedMonths.some(m => !actualMonthsList.includes(m));
+
+        // 1. Chế độ xem: Bảng Phân tích So sánh Cùng kỳ (Động theo Cặp năm so sánh & Đồng bộ theo kỳ chọn)
         if (state.yoyConfig && state.yoyConfig.viewMode === 'YOY_TABLE') {
+            const compSel = state.compareSelection || '3Y_2024_2025_2026';
+
+            if (compSel === '2Y_2025_2026') {
+                thead.innerHTML = `
+                    <tr>
+                        <th rowspan="2" class="p-2.5 text-center font-bold border-r border-blue-800 w-10 sticky-col-1 bg-[#00529C]">TT</th>
+                        <th rowspan="2" class="p-2.5 font-bold border-r border-blue-800 w-24 sticky-col-2 bg-[#00529C]">KMP B7</th>
+                        <th rowspan="2" class="p-2.5 font-bold border-r border-blue-800 w-24 sticky-col-3 bg-[#00529C]">KMP B10</th>
+                        <th rowspan="2" class="p-2.5 font-bold border-r border-blue-800 min-w-[220px] sticky-col-4 bg-[#00529C]">Tên Chi phí</th>
+                        <th rowspan="2" class="p-2.5 text-right font-bold border-r border-blue-800 w-28 bg-[#00488a] text-sky-200">
+                            NĂM 2025<br /><span class="text-[10px] text-sky-300 font-normal">(${periodDesc} - Tr.đ)</span>
+                        </th>
+                        <th rowspan="2" class="p-2.5 text-right font-black border-r border-blue-800 w-32 bg-[#059669] text-amber-200">
+                            NĂM 2026${hasAiInSel ? ' ✨' : ''}<br /><span class="text-[10px] text-emerald-100 font-normal">(${periodDesc}${hasAiInSel ? ' + AI' : ''} - Tr.đ)</span>
+                        </th>
+                        <th colspan="2" class="p-2 text-center font-bold border-r border-blue-800 bg-[#004080] text-amber-300">
+                            2026 SO VỚI 2025
+                        </th>
+                        <th rowspan="2" class="p-2.5 text-center font-bold border-r border-blue-800 w-24 bg-[#00529C]">
+                            Chi tiết ĐV
+                        </th>
+                    </tr>
+                    <tr class="bg-[#003870] text-[11px] text-white">
+                        <th class="p-2 text-right border-r border-blue-800 w-24">Chênh lệch (Tr.đ)</th>
+                        <th class="p-2 text-right border-r border-blue-800 w-24">% YoY</th>
+                    </tr>
+                `;
+            } else if (compSel === '2Y_2024_2026') {
+                thead.innerHTML = `
+                    <tr>
+                        <th rowspan="2" class="p-2.5 text-center font-bold border-r border-blue-800 w-10 sticky-col-1 bg-[#00529C]">TT</th>
+                        <th rowspan="2" class="p-2.5 font-bold border-r border-blue-800 w-24 sticky-col-2 bg-[#00529C]">KMP B7</th>
+                        <th rowspan="2" class="p-2.5 font-bold border-r border-blue-800 w-24 sticky-col-3 bg-[#00529C]">KMP B10</th>
+                        <th rowspan="2" class="p-2.5 font-bold border-r border-blue-800 min-w-[220px] sticky-col-4 bg-[#00529C]">Tên Chi phí</th>
+                        <th rowspan="2" class="p-2.5 text-right font-bold border-r border-blue-800 w-28 bg-[#00488a] text-purple-200">
+                            NĂM 2024<br /><span class="text-[10px] text-purple-300 font-normal">(${periodDesc} - Tr.đ)</span>
+                        </th>
+                        <th rowspan="2" class="p-2.5 text-right font-black border-r border-blue-800 w-32 bg-[#059669] text-amber-200">
+                            NĂM 2026${hasAiInSel ? ' ✨' : ''}<br /><span class="text-[10px] text-emerald-100 font-normal">(${periodDesc}${hasAiInSel ? ' + AI' : ''} - Tr.đ)</span>
+                        </th>
+                        <th colspan="2" class="p-2 text-center font-bold border-r border-blue-800 bg-[#0284C7] text-cyan-200">
+                            2026 SO VỚI 2024
+                        </th>
+                        <th rowspan="2" class="p-2.5 text-center font-bold border-r border-blue-800 w-24 bg-[#00529C]">
+                            Chi tiết ĐV
+                        </th>
+                    </tr>
+                    <tr class="bg-[#003870] text-[11px] text-white">
+                        <th class="p-2 text-right border-r border-blue-800 w-24">Chênh lệch (Tr.đ)</th>
+                        <th class="p-2 text-right border-r border-blue-800 w-24">% YoY</th>
+                    </tr>
+                `;
+            } else if (compSel === '2Y_2024_2025') {
+                thead.innerHTML = `
+                    <tr>
+                        <th rowspan="2" class="p-2.5 text-center font-bold border-r border-blue-800 w-10 sticky-col-1 bg-[#00529C]">TT</th>
+                        <th rowspan="2" class="p-2.5 font-bold border-r border-blue-800 w-24 sticky-col-2 bg-[#00529C]">KMP B7</th>
+                        <th rowspan="2" class="p-2.5 font-bold border-r border-blue-800 w-24 sticky-col-3 bg-[#00529C]">KMP B10</th>
+                        <th rowspan="2" class="p-2.5 font-bold border-r border-blue-800 min-w-[220px] sticky-col-4 bg-[#00529C]">Tên Chi phí</th>
+                        <th rowspan="2" class="p-2.5 text-right font-bold border-r border-blue-800 w-28 bg-[#00488a] text-purple-200">
+                            NĂM 2024<br /><span class="text-[10px] text-purple-300 font-normal">(${periodDesc} - Tr.đ)</span>
+                        </th>
+                        <th rowspan="2" class="p-2.5 text-right font-bold border-r border-blue-800 w-28 bg-[#00488a] text-sky-200">
+                            NĂM 2025<br /><span class="text-[10px] text-sky-300 font-normal">(${periodDesc} - Tr.đ)</span>
+                        </th>
+                        <th colspan="2" class="p-2 text-center font-bold border-r border-blue-800 bg-[#4F46E5] text-indigo-200">
+                            2025 SO VỚI 2024
+                        </th>
+                        <th rowspan="2" class="p-2.5 text-center font-bold border-r border-blue-800 w-24 bg-[#00529C]">
+                            Chi tiết ĐV
+                        </th>
+                    </tr>
+                    <tr class="bg-[#003870] text-[11px] text-white">
+                        <th class="p-2 text-right border-r border-blue-800 w-24">Chênh lệch (Tr.đ)</th>
+                        <th class="p-2 text-right border-r border-blue-800 w-24">% YoY</th>
+                    </tr>
+                `;
+            } else {
+                thead.innerHTML = `
+                    <tr>
+                        <th rowspan="2" class="p-2.5 text-center font-bold border-r border-blue-800 w-10 sticky-col-1 bg-[#00529C]">TT</th>
+                        <th rowspan="2" class="p-2.5 font-bold border-r border-blue-800 w-24 sticky-col-2 bg-[#00529C]">KMP B7</th>
+                        <th rowspan="2" class="p-2.5 font-bold border-r border-blue-800 w-24 sticky-col-3 bg-[#00529C]">KMP B10</th>
+                        <th rowspan="2" class="p-2.5 font-bold border-r border-blue-800 min-w-[220px] sticky-col-4 bg-[#00529C]">Tên Chi phí</th>
+                        <th rowspan="2" class="p-2.5 text-right font-bold border-r border-blue-800 w-28 bg-[#00488a] text-purple-200">
+                            NĂM 2024<br /><span class="text-[10px] text-purple-300 font-normal">(${periodDesc} - Tr.đ)</span>
+                        </th>
+                        <th rowspan="2" class="p-2.5 text-right font-bold border-r border-blue-800 w-28 bg-[#00488a] text-sky-200">
+                            NĂM 2025<br /><span class="text-[10px] text-sky-300 font-normal">(${periodDesc} - Tr.đ)</span>
+                        </th>
+                        <th rowspan="2" class="p-2.5 text-right font-black border-r border-blue-800 w-32 bg-[#059669] text-amber-200">
+                            NĂM 2026${hasAiInSel ? ' ✨' : ''}<br /><span class="text-[10px] text-emerald-100 font-normal">(${periodDesc}${hasAiInSel ? ' + AI' : ''} - Tr.đ)</span>
+                        </th>
+                        <th colspan="2" class="p-2 text-center font-bold border-r border-blue-800 bg-[#004080] text-amber-300">
+                            2026 SO VỚI 2025
+                        </th>
+                        <th colspan="2" class="p-2 text-center font-bold border-r border-blue-800 bg-[#0284C7] text-cyan-200">
+                            2026 SO VỚI 2024
+                        </th>
+                        <th colspan="2" class="p-2 text-center font-bold border-r border-blue-800 bg-[#4F46E5] text-indigo-200">
+                            2025 SO VỚI 2024
+                        </th>
+                        <th rowspan="2" class="p-2.5 text-center font-bold border-r border-blue-800 w-24 bg-[#00529C]">
+                            Chi tiết ĐV
+                        </th>
+                    </tr>
+                    <tr class="bg-[#003870] text-[11px] text-white">
+                        <th class="p-2 text-right border-r border-blue-800 w-24">Chênh lệch (Tr.đ)</th>
+                        <th class="p-2 text-right border-r border-blue-800 w-24">% YoY</th>
+                        <th class="p-2 text-right border-r border-blue-800 w-24">Chênh lệch (Tr.đ)</th>
+                        <th class="p-2 text-right border-r border-blue-800 w-24">% YoY</th>
+                        <th class="p-2 text-right border-r border-blue-800 w-24">Chênh lệch (Tr.đ)</th>
+                        <th class="p-2 text-right border-r border-blue-800 w-24">% YoY</th>
+                    </tr>
+                `;
+            }
+            return;
+        }
+
+        // 2. Chế độ xem: Chi tiết tháng (Động theo Năm & Kỳ đã chọn)
+
+        // 2A. KỊCH BẢN 1: CHỌN ĐÚNG 1 THÁNG DUY NHẤT (selCount === 1)
+        // Hiển thị đúng 5 cột: TT, B7, B10, Tên chi phí, Cột tháng. KHÔNG Lũy kế, KHÔNG Tổng cả năm.
+        if (selCount === 1) {
+            const targetMonth = selectedMonths[0];
+            let monthHeaderHtml = '';
+            if (isCurrentYear) {
+                if (actualMonthsList.includes(targetMonth)) {
+                    monthHeaderHtml = `
+                        <th class="p-2.5 text-right font-black bg-[#00529C] text-[#FFFFD4] w-36 border-r border-blue-800">
+                            THÁNG ${targetMonth < 10 ? '0' + targetMonth : targetMonth}/2026<br />
+                            <span class="text-[10px] font-normal text-emerald-200">(Thực tế - Tr.đ)</span>
+                        </th>
+                    `;
+                } else {
+                    monthHeaderHtml = `
+                        <th class="p-2.5 text-right font-black bg-[#0284C7] text-white w-36 border-r border-blue-800">
+                            THÁNG ${targetMonth < 10 ? '0' + targetMonth : targetMonth}/2026 ✨<br />
+                            <span class="text-[10px] font-normal text-cyan-100">(AI Dự phóng - Tr.đ)</span>
+                        </th>
+                    `;
+                }
+            } else {
+                monthHeaderHtml = `
+                    <th class="p-2.5 text-right font-black bg-[#00529C] text-[#FFFFD4] w-36 border-r border-blue-800">
+                        THÁNG ${targetMonth < 10 ? '0' + targetMonth : targetMonth}/${activeYear}<br />
+                        <span class="text-[10px] font-normal text-sky-200">(Tr.đ)</span>
+                    </th>
+                `;
+            }
+
             thead.innerHTML = `
                 <tr>
-                    <th rowspan="2" class="p-2.5 text-center font-bold border-r border-blue-800 w-10 sticky-col-1 bg-[#00529C]">TT</th>
-                    <th rowspan="2" class="p-2.5 font-bold border-r border-blue-800 w-24 sticky-col-2 bg-[#00529C]">KMP B7</th>
-                    <th rowspan="2" class="p-2.5 font-bold border-r border-blue-800 w-24 sticky-col-3 bg-[#00529C]">KMP B10</th>
-                    <th rowspan="2" class="p-2.5 font-bold border-r border-blue-800 min-w-[220px] sticky-col-4 bg-[#00529C]">Tên Chi phí</th>
-                    <th rowspan="2" class="p-2.5 text-right font-bold border-r border-blue-800 w-28 bg-[#00488a] text-purple-200">
-                        NĂM 2024<br /><span class="text-[10px] text-purple-300 font-normal">(Tr.đ)</span>
-                    </th>
-                    <th rowspan="2" class="p-2.5 text-right font-bold border-r border-blue-800 w-28 bg-[#00488a] text-sky-200">
-                        NĂM 2025<br /><span class="text-[10px] text-sky-300 font-normal">(Tr.đ)</span>
-                    </th>
-                    <th rowspan="2" class="p-2.5 text-right font-black border-r border-blue-800 w-32 bg-[#059669] text-amber-200">
-                        CẢ NĂM 2026<br /><span class="text-[10px] text-emerald-100 font-normal">(Thực hiện + AI)</span>
-                    </th>
-                    <th colspan="2" class="p-2 text-center font-bold border-r border-blue-800 bg-[#004080] text-amber-300">
-                        2026 SO VỚI 2025
-                    </th>
-                    <th colspan="2" class="p-2 text-center font-bold border-r border-blue-800 bg-[#0284C7] text-cyan-200">
-                        2026 SO VỚI 2024
-                    </th>
-                    <th colspan="2" class="p-2 text-center font-bold border-r border-blue-800 bg-[#4F46E5] text-indigo-200">
-                        2025 SO VỚI 2024
-                    </th>
-                    <th rowspan="2" class="p-2.5 text-center font-bold border-r border-blue-800 w-24 bg-[#00529C]">
-                        Chi tiết ĐV
-                    </th>
-                </tr>
-                <tr class="bg-[#003870] text-[11px] text-white">
-                    <th class="p-2 text-right border-r border-blue-800 w-24">Chênh lệch (Tr.đ)</th>
-                    <th class="p-2 text-right border-r border-blue-800 w-24">% YoY</th>
-                    <th class="p-2 text-right border-r border-blue-800 w-24">Chênh lệch (Tr.đ)</th>
-                    <th class="p-2 text-right border-r border-blue-800 w-24">% YoY</th>
-                    <th class="p-2 text-right border-r border-blue-800 w-24">Chênh lệch (Tr.đ)</th>
-                    <th class="p-2 text-right border-r border-blue-800 w-24">% YoY</th>
+                    <th class="p-2.5 text-center font-bold border-r border-blue-800 w-10 sticky-col-1 bg-[#00529C]">TT</th>
+                    <th class="p-2.5 font-bold border-r border-blue-800 w-28 sticky-col-2 bg-[#00529C]">KMP B7</th>
+                    <th class="p-2.5 font-bold border-r border-blue-800 w-24 sticky-col-3 bg-[#00529C]">KMP B10</th>
+                    <th class="p-2.5 font-bold border-r border-blue-800 min-w-[240px] sticky-col-4 bg-[#00529C]">Tên Chi phí</th>
+                    ${monthHeaderHtml}
                 </tr>
             `;
             return;
         }
 
-        const isShow = state.compareConfig ? (state.compareConfig.show !== false) : (state.columnVisibility.cost2025 !== false);
-        const mode = (state.compareConfig && state.compareConfig.mode) || '2025';
-
-        const actualMonthsList = state.actualMonths || [1, 2, 3, 4, 5, 6, 7];
-        const selActual = (state.selectedMonths || []).filter(m => actualMonthsList.includes(m)).sort((a, b) => a - b);
-        const selPlan = (state.selectedMonths || []).filter(m => !actualMonthsList.includes(m)).sort((a, b) => a - b);
-
-        const hasSubHeaderRow = (selActual.length > 0) || (selPlan.length > 0);
-        const rowSpan = hasSubHeaderRow ? 'rowspan="2"' : '';
-
-        let thCompare = '';
-        if (isShow) {
-            if (mode === '2025') {
-                thCompare = `
-                    <th ${rowSpan} class="p-2.5 text-right font-bold border-r border-blue-800 w-28 text-blue-100 bg-[#00488a]">
-                        TỔNG CHI PHÍ NĂM 2025<br /><span class="text-[10px] text-blue-200 font-normal">(Cả năm - ĐVT: Tr đồng)</span>
+        // 2B. KỊCH BẢN 2: CHỌN NHIỀU THÁNG TÙY Ý (2 đến 11 tháng)
+        // Hiển thị từng cột tháng đã chọn + đúng 1 cột "LŨY KẾ". TUYỆT ĐỐI KHÔNG HIỂN THỊ cột "Tổng cả năm".
+        if (selCount < 12) {
+            let thGroupHeader = '';
+            if (!isCurrentYear) {
+                thGroupHeader = `
+                    <th colspan="${selCount}" class="p-2 text-center font-bold border-r border-blue-800 bg-[#004080] text-[#FFFFD4]">
+                        CHI PHÍ NĂM ${activeYear} (${selCount} tháng đã chọn - ĐVT: Tr đồng)
                     </th>
                 `;
-            } else if (mode === '2024') {
-                thCompare = `
-                    <th ${rowSpan} class="p-2.5 text-right font-bold border-r border-blue-800 w-28 text-blue-100 bg-[#00488a]">
-                        TỔNG CHI PHÍ NĂM 2024<br /><span class="text-[10px] text-blue-200 font-normal">(Cả năm - ĐVT: Tr đồng)</span>
-                    </th>
-                `;
-            } else if (mode === 'BOTH') {
-                thCompare = `
-                    <th ${rowSpan} class="p-2.5 text-right font-bold border-r border-blue-800 w-28 text-blue-100 bg-[#00488a]">
-                        TỔNG CẢ NĂM 2024<br /><span class="text-[10px] text-blue-200 font-normal">(ĐVT: Tr đồng)</span>
-                    </th>
-                    <th ${rowSpan} class="p-2.5 text-right font-bold border-r border-blue-800 w-28 text-blue-100 bg-[#00488a]">
-                        TỔNG CẢ NĂM 2025<br /><span class="text-[10px] text-blue-200 font-normal">(ĐVT: Tr đồng)</span>
-                    </th>
-                `;
+            } else {
+                const actualInSel = selectedMonths.filter(m => actualMonthsList.includes(m));
+                const aiInSel = selectedMonths.filter(m => !actualMonthsList.includes(m));
+                let actGroupHtml = '';
+                let aiGroupHtml = '';
+
+                if (actualInSel.length > 0) {
+                    actGroupHtml = `
+                        <th colspan="${actualInSel.length}" class="p-2 text-center font-bold border-r border-blue-800 bg-[#004080] text-[#FFFFD4]">
+                            ĐÃ THỰC HIỆN NĂM 2026 (ĐVT: Tr đồng)
+                        </th>
+                    `;
+                }
+                if (aiInSel.length > 0) {
+                    aiGroupHtml = `
+                        <th colspan="${aiInSel.length}" class="p-2 text-center font-bold border-r border-blue-800 bg-[#0284C7] text-white">
+                            AI DỰ PHÓNG 2026 ✨ (ĐVT: Tr đồng)
+                        </th>
+                    `;
+                }
+                thGroupHeader = actGroupHtml + aiGroupHtml;
             }
+
+            // Hàng 2: Chi tiết từng tháng đã chọn
+            let thMonthsSub = '';
+            selectedMonths.forEach(m => {
+                const isAi = isCurrentYear && !actualMonthsList.includes(m);
+                if (isAi) {
+                    thMonthsSub += `<th class="p-2 text-right border-r border-blue-800 w-16 text-cyan-200 font-bold">T${m} ✨</th>`;
+                } else {
+                    thMonthsSub += `<th class="p-2 text-right border-r border-blue-800 w-16">T${m}</th>`;
+                }
+            });
+
+            // Cột LŨY KẾ (Rowspan 2): Cảnh báo trực quan khi có lẫn AI
+            const thLuyKeHeader = `
+                <th rowspan="2" class="p-2.5 text-right font-black border-r border-blue-800 w-32 bg-amber-400 text-slate-950">
+                    LUỸ KẾ (${selCount}T)${hasAiInSel ? ' ✨' : ''}<br />
+                    <span class="text-[9px] font-normal ${hasAiInSel ? 'text-rose-950 font-bold' : 'text-slate-900'}">(${hasAiInSel ? 'Bao gồm AI' : '100% Thực tế'} - Tr.đ)</span>
+                </th>
+            `;
+
+            thead.innerHTML = `
+                <tr>
+                    <th rowspan="2" class="p-2.5 text-center font-bold border-r border-blue-800 w-10 sticky-col-1 bg-[#00529C]">TT</th>
+                    <th rowspan="2" class="p-2.5 font-bold border-r border-blue-800 w-28 sticky-col-2 bg-[#00529C]">KMP B7</th>
+                    <th rowspan="2" class="p-2.5 font-bold border-r border-blue-800 w-24 sticky-col-3 bg-[#00529C]">KMP B10</th>
+                    <th rowspan="2" class="p-2.5 font-bold border-r border-blue-800 min-w-[240px] sticky-col-4 bg-[#00529C]">Tên Chi phí</th>
+                    ${thGroupHeader}
+                    ${thLuyKeHeader}
+                </tr>
+                <tr class="bg-[#003870] text-[11px] text-white">
+                    ${thMonthsSub}
+                </tr>
+            `;
+            return;
         }
 
-        let luyKeSub = '';
-        if (selActual.length === 7 && selActual.every((m, i) => m === i + 1)) {
-            luyKeSub = 'T1 - T7';
-        } else if (selActual.length === 0) {
-            luyKeSub = '0 tháng';
-        } else if (selActual.length === 1) {
-            luyKeSub = `T${selActual[0]}`;
-        } else if (selActual.every((m, idx, arr) => idx === 0 || m === arr[idx - 1] + 1)) {
-            luyKeSub = `T${selActual[0]} - T${selActual[selActual.length - 1]}`;
+        // 2C. KỊCH BẢN 3: CHỌN ĐỦ CẢ NĂM 12 THÁNG (selCount === 12)
+        // Hiển thị đủ 12 cột tháng + Cột "TỔNG CẢ NĂM". TUYỆT ĐỐI KHÔNG HIỂN THỊ cột "Lũy kế" riêng để tránh trùng lặp.
+        let thGroup12 = '';
+        let thMonths12Sub = '';
+
+        if (!isCurrentYear) {
+            thGroup12 = `
+                <th colspan="12" class="p-2 text-center font-bold border-r border-blue-800 bg-[#004080] text-[#FFFFD4]">
+                    CHI PHÍ NĂM ${activeYear} (100% Thực tế - ĐVT: Tr đồng)
+                </th>
+            `;
+            for (let m = 1; m <= 12; m++) {
+                thMonths12Sub += `<th class="p-2 text-right border-r border-blue-800 w-16">T${m}</th>`;
+            }
         } else {
-            luyKeSub = selActual.map(m => 'T' + m).join(',');
-        }
-
-        // Header Khối Đã thực hiện (chỉ hiển thị khi có ít nhất 1 tháng thực tế được chọn)
-        let thActualHeader = '';
-        let thActualSub = '';
-        let thLuyKe = '';
-        if (selActual.length > 0) {
-            const colspanActual = selActual.length + 1; // Các tháng thực hiện được tick + cột LUỸ KẾ
-            thActualHeader = `
-                <th colspan="${colspanActual}" class="p-2 text-center font-bold border-r border-blue-800 bg-[#004080] text-[#FFFFD4]">
+            const remainingMonths = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].filter(m => !actualMonthsList.includes(m));
+            thGroup12 = `
+                <th colspan="${actualMonthsList.length}" class="p-2 text-center font-bold border-r border-blue-800 bg-[#004080] text-[#FFFFD4]">
                     ĐÃ THỰC HIỆN NĂM 2026 (ĐVT: Tr đồng)
                 </th>
-            `;
-
-            selActual.forEach(m => {
-                thActualSub += `<th class="p-2 text-right border-r border-blue-800 w-16">T${m}</th>`;
-            });
-            thLuyKe = `
-                <th class="p-2 text-right border-r border-blue-800 w-24 bg-amber-400 text-slate-950 font-black">
-                    LUỸ KẾ<br /><span class="text-[9px] font-normal text-slate-900">${luyKeSub}</span>
+                <th colspan="${remainingMonths.length}" class="p-2 text-center font-bold border-r border-blue-800 bg-[#0284C7] text-white">
+                    AI DỰ PHÓNG 2026 ✨ (ĐVT: Tr đồng)
                 </th>
             `;
-        }
-
-        // Header Khối Kế hoạch / AI Dự kiến (chỉ hiển thị khi có tháng AI được tick)
-        let thPlanHeader = '';
-        let thPlanSub = '';
-        if (selPlan.length > 0) {
-            thPlanHeader = `
-                <th colspan="${selPlan.length}" class="p-2 text-center font-bold border-r border-blue-800 bg-[#0284C7] text-white">
-                    KẾ HOẠCH / AI DỰ KIẾN 2026 (ĐVT: Tr đồng)
-                </th>
-            `;
-            selPlan.forEach(m => {
-                thPlanSub += `<th class="p-2 text-right border-r border-blue-800 w-16 text-cyan-200">T${m}</th>`;
+            actualMonthsList.forEach(m => {
+                thMonths12Sub += `<th class="p-2 text-right border-r border-blue-800 w-16">T${m}</th>`;
+            });
+            remainingMonths.forEach(m => {
+                thMonths12Sub += `<th class="p-2 text-right border-r border-blue-800 w-16 text-cyan-200 font-bold">T${m} ✨</th>`;
             });
         }
+
+        const thFullYearHeader = `
+            <th rowspan="2" class="p-2.5 text-right font-black bg-[#059669] text-[#FFFFD4] w-32">
+                TỔNG CẢ NĂM ${activeYear}<br /><span class="text-[10px] font-normal text-emerald-100">(ĐVT: Tr đồng)</span>
+            </th>
+        `;
 
         thead.innerHTML = `
             <tr>
-                <th ${rowSpan} class="p-2.5 text-center font-bold border-r border-blue-800 w-10 sticky-col-1 bg-[#00529C]">TT</th>
-                <th ${rowSpan} class="p-2.5 font-bold border-r border-blue-800 w-28 sticky-col-2 bg-[#00529C]">KMP B7</th>
-                <th ${rowSpan} class="p-2.5 font-bold border-r border-blue-800 w-24 sticky-col-3 bg-[#00529C]">KMP B10</th>
-                <th ${rowSpan} class="p-2.5 font-bold border-r border-blue-800 min-w-[220px] sticky-col-4 bg-[#00529C]">Tên Chi phí</th>
-                ${thCompare}
-                ${thActualHeader}
-                ${thPlanHeader}
-                <th ${rowSpan} class="p-2.5 text-right font-black bg-[#059669] text-[#FFFFD4] w-32">
-                    CẢ NĂM 2026<br /><span class="text-[10px] font-normal text-emerald-100">(Thực hiện + Dự kiến)</span>
-                </th>
+                <th rowspan="2" class="p-2.5 text-center font-bold border-r border-blue-800 w-10 sticky-col-1 bg-[#00529C]">TT</th>
+                <th rowspan="2" class="p-2.5 font-bold border-r border-blue-800 w-28 sticky-col-2 bg-[#00529C]">KMP B7</th>
+                <th rowspan="2" class="p-2.5 font-bold border-r border-blue-800 w-24 sticky-col-3 bg-[#00529C]">KMP B10</th>
+                <th rowspan="2" class="p-2.5 font-bold border-r border-blue-800 min-w-[240px] sticky-col-4 bg-[#00529C]">Tên Chi phí</th>
+                ${thGroup12}
+                ${thFullYearHeader}
             </tr>
-            ${hasSubHeaderRow ? `
             <tr class="bg-[#003870] text-[11px] text-white">
-                ${thActualSub}
-                ${thLuyKe}
-                ${thPlanSub}
+                ${thMonths12Sub}
             </tr>
-            ` : ''}
         `;
     }
 
@@ -3214,29 +3692,26 @@
         if (!tbody) return;
         tbody.innerHTML = '';
 
-        const actualMonthsList = state.actualMonths || [1, 2, 3, 4, 5, 6, 7];
-        const selActual = (state.selectedMonths || []).filter(m => actualMonthsList.includes(m)).sort((a, b) => a - b);
-        const selPlan = (state.selectedMonths || []).filter(m => !actualMonthsList.includes(m)).sort((a, b) => a - b);
-
-        let luyKePeriodLabel = 'Luỹ kế';
-        if (selActual.length === 7 && selActual.every((m, i) => m === i + 1)) {
-            luyKePeriodLabel = 'Luỹ kế T1 - T7';
-        } else if (selActual.length === 0) {
-            luyKePeriodLabel = 'Luỹ kế (0 tháng)';
-        } else if (selActual.length === 1) {
-            luyKePeriodLabel = `Luỹ kế T${selActual[0]}`;
-        } else if (selActual.every((m, idx, arr) => idx === 0 || m === arr[idx - 1] + 1)) {
-            luyKePeriodLabel = `Luỹ kế T${selActual[0]} - T${selActual[selActual.length - 1]}`;
-        } else {
-            luyKePeriodLabel = `Luỹ kế (${selActual.map(m => 'T' + m).join(', ')})`;
-        }
-
         const isYoYTable = state.yoyConfig && state.yoyConfig.viewMode === 'YOY_TABLE';
-        const isShowCompare = state.compareConfig ? (state.compareConfig.show !== false) : (state.columnVisibility.cost2025 !== false);
-        const compareMode = (state.compareConfig && state.compareConfig.mode) || '2025';
-        const numCompareCols = !isShowCompare ? 0 : (compareMode === 'BOTH' ? 2 : 1);
-        const actualColsCount = selActual.length > 0 ? (selActual.length + 1) : 0;
-        const totalCols = isYoYTable ? 14 : (4 + numCompareCols + actualColsCount + selPlan.length + 1);
+        const activeYear = state.selectedYear ? parseInt(state.selectedYear, 10) : 2026;
+        const isCurrentYear = (activeYear === 2026);
+        const actualMonthsList = isCurrentYear ? (state.actualMonths || [1, 2, 3, 4, 5, 6]) : [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+        const maxActual = actualMonthsList.length > 0 ? Math.max(...actualMonthsList) : 6;
+        const selectedMonths = (state.selectedMonths && state.selectedMonths.length > 0)
+            ? [...state.selectedMonths].sort((a, b) => a - b)
+            : [...actualMonthsList];
+        const selCount = selectedMonths.length;
+
+        let totalCols = 14;
+        if (!isYoYTable) {
+            if (selCount === 1) {
+                totalCols = 5;
+            } else if (selCount < 12) {
+                totalCols = 4 + selCount + 1; // 4 sticky + selCount months + 1 Lũy kế
+            } else {
+                totalCols = 4 + 12 + 1; // 17 (4 sticky + 12 months + 1 Tổng cả năm)
+            }
+        }
 
         let displayRows = allCalculatedRows;
         if (state.filters.materialOnly) {
@@ -3265,15 +3740,16 @@
             grouped[grp].push(r);
         });
 
-        // Nếu đang ở Chế độ Xem Bảng So sánh Cùng kỳ YoY 3 Năm (2024 - 2025 - 2026)
+        // 1. Chế độ xem: So sánh cùng kỳ
         if (isYoYTable) {
             renderYoYTableContent(grouped, displayRows, tbody);
             return;
         }
 
+        // 2. Chế độ xem: Chi tiết tháng
         let stt = 1;
         let grand2024 = 0, grand2025 = 0, grand2026 = 0;
-        const grandMonths = Array(12).fill(0);
+        const grandMonths2026 = Array(12).fill(0);
         const grandMonths2025 = Array(12).fill(0);
         const grandMonths2024 = Array(12).fill(0);
 
@@ -3281,9 +3757,8 @@
             const rows = grouped[grpName];
             const isCollapsed = !!state.collapsedGroups[grpName];
 
-            // Tổng nhóm
             let grp2024 = 0, grp2025 = 0, grp2026 = 0;
-            const grpMonths = Array(12).fill(0);
+            const grpMonths2026 = Array(12).fill(0);
             const grpMonths2025 = Array(12).fill(0);
             const grpMonths2024 = Array(12).fill(0);
 
@@ -3292,10 +3767,10 @@
                 grp2025 += (r.total2025 || 0);
                 grp2026 += (r.fullYear2026 || 0);
                 for (let i = 0; i < 12; i++) {
-                    grpMonths[i] += (r.monthly2026[i] || 0);
+                    grpMonths2026[i] += (r.monthly2026[i] || 0);
                     grpMonths2025[i] += (r.monthly2025[i] || 0);
                     grpMonths2024[i] += (r.monthly2024[i] || 0);
-                    grandMonths[i] += (r.monthly2026[i] || 0);
+                    grandMonths2026[i] += (r.monthly2026[i] || 0);
                     grandMonths2025[i] += (r.monthly2025[i] || 0);
                     grandMonths2024[i] += (r.monthly2024[i] || 0);
                 }
@@ -3304,121 +3779,99 @@
             grand2025 += grp2025;
             grand2026 += grp2026;
 
-            const grpLuỹKế = selActual.reduce((sum, m) => sum + (grpMonths[m - 1] || 0), 0);
-            const grpLuỹKế2025 = selActual.reduce((sum, m) => sum + (grpMonths2025[m - 1] || 0), 0);
-            const grpLuỹKế2024 = selActual.reduce((sum, m) => sum + (grpMonths2024[m - 1] || 0), 0);
+            const activeGrpMonths = (activeYear === 2025) ? grpMonths2025 : ((activeYear === 2024) ? grpMonths2024 : grpMonths2026);
+            const activeGrpTotal = (activeYear === 2025) ? grp2025 : ((activeYear === 2024) ? grp2024 : grp2026);
 
             // 1. HÀNG TIÊU ĐỀ NHÓM (GROUP HEADER ROW)
             const grpTr = document.createElement('tr');
             grpTr.className = 'bg-[#FEF3C7] text-[#00529C] font-extrabold text-xs border-y border-amber-200 select-none';
 
-            let grpTdCompare = '';
-            if (isShowCompare) {
-                if (compareMode === '2025') {
-                    grpTdCompare = `
-                        <td class="p-2 text-right border-r border-amber-200/80 font-mono text-slate-900 bg-amber-100/50 hover:bg-amber-200/80 cursor-pointer transition-colors"
-                            data-tooltip-cell="true"
-                            data-tooltip-type="compare"
-                            data-target-year="2025"
-                            data-tooltip-title="${escapeHtml(grpName)}"
-                            data-tooltip-subtitle="(Tổng nhóm chi phí)"
-                            data-tooltip-period="Cả năm 2025"
-                            data-val-2026="${grp2026}"
-                            data-val-2025="${grp2025}"
-                            data-val-2024="${grp2024}">${formatNumber(grp2025)}</td>
-                    `;
-                } else if (compareMode === '2024') {
-                    grpTdCompare = `
-                        <td class="p-2 text-right border-r border-amber-200/80 font-mono text-slate-900 bg-amber-100/50 hover:bg-amber-200/80 cursor-pointer transition-colors"
-                            data-tooltip-cell="true"
-                            data-tooltip-type="compare"
-                            data-target-year="2024"
-                            data-tooltip-title="${escapeHtml(grpName)}"
-                            data-tooltip-subtitle="(Tổng nhóm chi phí)"
-                            data-tooltip-period="Cả năm 2024"
-                            data-val-2026="${grp2026}"
-                            data-val-2025="${grp2025}"
-                            data-val-2024="${grp2024}">${formatNumber(grp2024)}</td>
-                    `;
-                } else if (compareMode === 'BOTH') {
-                    grpTdCompare = `
-                        <td class="p-2 text-right border-r border-amber-200/80 font-mono text-slate-900 bg-amber-100/40 hover:bg-amber-200/80 cursor-pointer transition-colors"
-                            data-tooltip-cell="true"
-                            data-tooltip-type="compare"
-                            data-target-year="2024"
-                            data-tooltip-title="${escapeHtml(grpName)}"
-                            data-tooltip-subtitle="(Tổng nhóm chi phí)"
-                            data-tooltip-period="Cả năm 2024"
-                            data-val-2026="${grp2026}"
-                            data-val-2025="${grp2025}"
-                            data-val-2024="${grp2024}"
-                            title="Cả năm 2024">${formatNumber(grp2024)}</td>
-                        <td class="p-2 text-right border-r border-amber-200/80 font-mono text-slate-900 bg-amber-100/60 hover:bg-amber-200/80 cursor-pointer transition-colors"
-                            data-tooltip-cell="true"
-                            data-tooltip-type="compare"
-                            data-target-year="2025"
-                            data-tooltip-title="${escapeHtml(grpName)}"
-                            data-tooltip-subtitle="(Tổng nhóm chi phí)"
-                            data-tooltip-period="Cả năm 2025"
-                            data-val-2026="${grp2026}"
-                            data-val-2025="${grp2025}"
-                            data-val-2024="${grp2024}"
-                            title="Cả năm 2025">${formatNumber(grp2025)}</td>
-                    `;
-                }
-            }
-
-            let grpActualMonthsTd = '';
-            selActual.forEach(m => {
-                const idx = m - 1;
-                grpActualMonthsTd += `
-                    <td class="p-2 text-right border-r border-amber-200/80 font-mono hover:bg-amber-200/70 cursor-pointer transition-colors"
+            let grpDataCells = '';
+            if (selCount === 1) {
+                // Kịch bản 1: Chỉ 1 cột duy nhất của tháng được chọn
+                const m = selectedMonths[0];
+                const mIdx = m - 1;
+                grpDataCells = `
+                    <td class="p-2 text-right border-r border-amber-200/80 font-mono font-black text-slate-900 bg-amber-100/70 hover:bg-amber-200 cursor-pointer transition-colors"
                         data-tooltip-cell="true"
                         data-tooltip-type="month"
                         data-tooltip-title="${escapeHtml(grpName)}"
                         data-tooltip-subtitle="(Tổng nhóm chi phí)"
-                        data-tooltip-period="T${m < 10 ? '0' + m : m}/2026"
+                        data-tooltip-period="T${m < 10 ? '0' + m : m}/${activeYear}"
                         data-month-num="${m}"
-                        data-val-2026="${grpMonths[idx]}"
-                        data-val-2025="${grpMonths2025[idx]}"
-                        data-val-2024="${grpMonths2024[idx]}">
-                        ${formatNumber(grpMonths[idx])}
+                        data-val-2026="${grpMonths2026[mIdx]}"
+                        data-val-2025="${grpMonths2025[mIdx]}"
+                        data-val-2024="${grpMonths2024[mIdx]}">
+                        ${formatNumber(activeGrpMonths[mIdx])}
                     </td>
                 `;
-            });
+            } else if (selCount < 12) {
+                // Kịch bản 2: Các tháng được chọn + Đúng 1 cột Lũy kế (KHÔNG có cột Tổng cả năm)
+                selectedMonths.forEach(m => {
+                    const idx = m - 1;
+                    grpDataCells += `
+                        <td class="p-2 text-right border-r border-amber-200/80 font-mono hover:bg-amber-200/70 cursor-pointer transition-colors"
+                            data-tooltip-cell="true"
+                            data-tooltip-type="month"
+                            data-tooltip-title="${escapeHtml(grpName)}"
+                            data-tooltip-subtitle="(Tổng nhóm chi phí)"
+                            data-tooltip-period="T${m < 10 ? '0' + m : m}/${activeYear}"
+                            data-month-num="${m}"
+                            data-val-2026="${grpMonths2026[idx]}"
+                            data-val-2025="${grpMonths2025[idx]}"
+                            data-val-2024="${grpMonths2024[idx]}">
+                            ${formatNumber(activeGrpMonths[idx])}
+                        </td>
+                    `;
+                });
+                const grpLuyKe = selectedMonths.reduce((sum, m) => sum + (activeGrpMonths[m - 1] || 0), 0);
+                const grpLuyKe26 = selectedMonths.reduce((sum, m) => sum + (grpMonths2026[m - 1] || 0), 0);
+                const grpLuyKe25 = selectedMonths.reduce((sum, m) => sum + (grpMonths2025[m - 1] || 0), 0);
+                const grpLuyKe24 = selectedMonths.reduce((sum, m) => sum + (grpMonths2024[m - 1] || 0), 0);
 
-            let grpPlanMonthsTd = '';
-            selPlan.forEach(m => {
-                const idx = m - 1;
-                grpPlanMonthsTd += `
-                    <td class="p-2 text-right border-r border-amber-200/80 font-mono text-slate-700 hover:bg-amber-200/70 cursor-pointer transition-colors"
-                        data-tooltip-cell="true"
-                        data-tooltip-type="month"
-                        data-tooltip-title="${escapeHtml(grpName)}"
-                        data-tooltip-subtitle="(Tổng nhóm chi phí)"
-                        data-tooltip-period="T${m < 10 ? '0' + m : m}/2026"
-                        data-month-num="${m}"
-                        data-val-2026="${grpMonths[idx]}"
-                        data-val-2025="${grpMonths2025[idx]}"
-                        data-val-2024="${grpMonths2024[idx]}">
-                        ${formatNumber(grpMonths[idx])}
-                    </td>
-                `;
-            });
-
-            let grpLuyKeTd = '';
-            if (selActual.length > 0) {
-                grpLuyKeTd = `
+                grpDataCells += `
                     <td class="p-2 text-right border-r border-amber-200/80 font-mono font-black bg-amber-300/80 text-slate-950 hover:bg-amber-400 cursor-pointer transition-colors"
                         data-tooltip-cell="true"
                         data-tooltip-type="luyke"
                         data-tooltip-title="${escapeHtml(grpName)}"
                         data-tooltip-subtitle="(Tổng nhóm chi phí)"
-                        data-tooltip-period="${luyKePeriodLabel}"
-                        data-val-2026="${grpLuỹKế}"
-                        data-val-2025="${grpLuỹKế2025}"
-                        data-val-2024="${grpLuỹKế2024}">
-                        ${formatNumber(grpLuỹKế)}
+                        data-tooltip-period="Lũy kế (${selCount} tháng)"
+                        data-val-2026="${grpLuyKe26}"
+                        data-val-2025="${grpLuyKe25}"
+                        data-val-2024="${grpLuyKe24}">
+                        ${formatNumber(grpLuyKe)}
+                    </td>
+                `;
+            } else {
+                // Kịch bản 3: Đủ 12 tháng + Đúng 1 cột Tổng cả năm (KHÔNG có cột Lũy kế)
+                for (let i = 0; i < 12; i++) {
+                    const m = i + 1;
+                    grpDataCells += `
+                        <td class="p-2 text-right border-r border-amber-200/80 font-mono hover:bg-amber-200/70 cursor-pointer transition-colors"
+                            data-tooltip-cell="true"
+                            data-tooltip-type="month"
+                            data-tooltip-title="${escapeHtml(grpName)}"
+                            data-tooltip-subtitle="(Tổng nhóm chi phí)"
+                            data-tooltip-period="T${m < 10 ? '0' + m : m}/${activeYear}"
+                            data-month-num="${m}"
+                            data-val-2026="${grpMonths2026[i]}"
+                            data-val-2025="${grpMonths2025[i]}"
+                            data-val-2024="${grpMonths2024[i]}">
+                            ${formatNumber(activeGrpMonths[i])}
+                        </td>
+                    `;
+                }
+                grpDataCells += `
+                    <td class="p-2 text-right font-mono font-black bg-emerald-100 text-emerald-900 hover:bg-emerald-200 cursor-pointer transition-colors"
+                        data-tooltip-cell="true"
+                        data-tooltip-type="fullyear"
+                        data-tooltip-title="${escapeHtml(grpName)}"
+                        data-tooltip-subtitle="(Tổng nhóm chi phí)"
+                        data-tooltip-period="Cả năm ${activeYear}"
+                        data-val-2026="${grp2026}"
+                        data-val-2025="${grp2025}"
+                        data-val-2024="${grp2024}">
+                        ${formatNumber(activeGrpTotal)}
                     </td>
                 `;
             }
@@ -3430,24 +3883,9 @@
                 <td colspan="3" class="p-2 text-left text-[#00529C] border-r border-amber-200/80 font-extrabold text-xs cursor-pointer" data-action="toggle-collapse">
                     <span>${(window.getGroupIcon ? window.getGroupIcon(grpName) : '📑')} ${escapeHtml(grpName)} (${rows.length} khoản mục)</span>
                 </td>
-                ${grpTdCompare}
-                ${grpActualMonthsTd}
-                ${grpLuyKeTd}
-                ${grpPlanMonthsTd}
-                <td class="p-2 text-right font-mono font-black bg-emerald-100 text-emerald-900 hover:bg-emerald-200 cursor-pointer transition-colors"
-                    data-tooltip-cell="true"
-                    data-tooltip-type="fullyear"
-                    data-tooltip-title="${escapeHtml(grpName)}"
-                    data-tooltip-subtitle="(Tổng nhóm chi phí)"
-                    data-tooltip-period="Cả năm 2026"
-                    data-val-2026="${grp2026}"
-                    data-val-2025="${grp2025}"
-                    data-val-2024="${grp2024}">
-                    ${formatNumber(grp2026)}
-                </td>
+                ${grpDataCells}
             `;
 
-            // Bấm vào tiêu đề nhóm để đóng/mở
             grpTr.addEventListener('click', (e) => {
                 if (e.target.closest('[data-action="toggle-collapse"]') || e.target === grpTr || e.target.tagName === 'SPAN') {
                     state.collapsedGroups[grpName] = !state.collapsedGroups[grpName];
@@ -3463,125 +3901,103 @@
                     const tr = document.createElement('tr');
                     tr.className = `text-xs border-b border-slate-200 hover:bg-blue-50/50 transition-colors ${r.category.is_material ? 'bg-amber-50/40' : 'bg-white'}`;
 
-                    const itemLuỹKế = selActual.reduce((sum, m) => sum + ((r.monthly2026 && r.monthly2026[m - 1]) || 0), 0);
-                    const itemLuỹKế2025 = selActual.reduce((sum, m) => sum + ((r.monthly2025 && r.monthly2025[m - 1]) || 0), 0);
-                    const itemLuỹKế2024 = selActual.reduce((sum, m) => sum + ((r.monthly2024 && r.monthly2024[m - 1]) || 0), 0);
-
-                    let itemTdCompare = '';
-                    if (isShowCompare) {
-                        if (compareMode === '2025') {
-                            itemTdCompare = `
-                                <td class="p-2 text-right border-r border-slate-200 font-mono text-slate-700 bg-slate-50/50 hover:bg-blue-100/70 cursor-pointer transition-colors"
-                                    data-tooltip-cell="true"
-                                    data-tooltip-type="compare"
-                                    data-target-year="2025"
-                                    data-tooltip-title="${escapeHtml(r.category.name)}"
-                                    data-tooltip-subtitle="${escapeHtml(r.category.b7_display || r.category.b10_display || '')}"
-                                    data-tooltip-period="Cả năm 2025"
-                                    data-val-2026="${r.fullYear2026}"
-                                    data-val-2025="${r.total2025}"
-                                    data-val-2024="${r.total2024}">${formatNumber(r.total2025)}</td>
-                            `;
-                        } else if (compareMode === '2024') {
-                            itemTdCompare = `
-                                <td class="p-2 text-right border-r border-slate-200 font-mono text-slate-700 bg-slate-50/50 hover:bg-blue-100/70 cursor-pointer transition-colors"
-                                    data-tooltip-cell="true"
-                                    data-tooltip-type="compare"
-                                    data-target-year="2024"
-                                    data-tooltip-title="${escapeHtml(r.category.name)}"
-                                    data-tooltip-subtitle="${escapeHtml(r.category.b7_display || r.category.b10_display || '')}"
-                                    data-tooltip-period="Cả năm 2024"
-                                    data-val-2026="${r.fullYear2026}"
-                                    data-val-2025="${r.total2025}"
-                                    data-val-2024="${r.total2024}">${formatNumber(r.total2024)}</td>
-                            `;
-                        } else if (compareMode === 'BOTH') {
-                            itemTdCompare = `
-                                <td class="p-2 text-right border-r border-slate-200 font-mono text-slate-700 bg-slate-50/40 hover:bg-blue-100/70 cursor-pointer transition-colors"
-                                    data-tooltip-cell="true"
-                                    data-tooltip-type="compare"
-                                    data-target-year="2024"
-                                    data-tooltip-title="${escapeHtml(r.category.name)}"
-                                    data-tooltip-subtitle="${escapeHtml(r.category.b7_display || r.category.b10_display || '')}"
-                                    data-tooltip-period="Cả năm 2024"
-                                    data-val-2026="${r.fullYear2026}"
-                                    data-val-2025="${r.total2025}"
-                                    data-val-2024="${r.total2024}"
-                                    title="Cả năm 2024">${formatNumber(r.total2024)}</td>
-                                <td class="p-2 text-right border-r border-slate-200 font-mono text-slate-700 bg-slate-50/60 hover:bg-blue-100/70 cursor-pointer transition-colors"
-                                    data-tooltip-cell="true"
-                                    data-tooltip-type="compare"
-                                    data-target-year="2025"
-                                    data-tooltip-title="${escapeHtml(r.category.name)}"
-                                    data-tooltip-subtitle="${escapeHtml(r.category.b7_display || r.category.b10_display || '')}"
-                                    data-tooltip-period="Cả năm 2025"
-                                    data-val-2026="${r.fullYear2026}"
-                                    data-val-2025="${r.total2025}"
-                                    data-val-2024="${r.total2024}"
-                                    title="Cả năm 2025">${formatNumber(r.total2025)}</td>
-                            `;
-                        }
-                    }
-
-                    let itemActualMonthsTd = '';
-                    selActual.forEach(m => {
-                        const idx = m - 1;
-                        const val = (r.monthly2026 && r.monthly2026[idx]) || 0;
-                        const v25 = (r.monthly2025 && r.monthly2025[idx]) || 0;
-                        const v24 = (r.monthly2024 && r.monthly2024[idx]) || 0;
-                        itemActualMonthsTd += `
-                            <td class="p-2 text-right border-r border-slate-200 font-mono hover:bg-blue-100/70 cursor-pointer transition-colors"
-                                data-tooltip-cell="true"
-                                data-tooltip-type="month"
-                                data-tooltip-title="${escapeHtml(r.category.name)}"
-                                data-tooltip-subtitle="${escapeHtml(r.category.b7_display || r.category.b10_display || '')}"
-                                data-tooltip-period="T${m < 10 ? '0' + m : m}/2026"
-                                data-month-num="${m}"
-                                data-val-2026="${val}"
-                                data-val-2025="${v25}"
-                                data-val-2024="${v24}">
-                                ${formatNumber(val)}
-                            </td>
-                        `;
-                    });
-
-                    let itemPlanMonthsTd = '';
-                    selPlan.forEach(m => {
-                        const idx = m - 1;
-                        const val = (r.monthly2026 && r.monthly2026[idx]) || 0;
-                        const v25 = (r.monthly2025 && r.monthly2025[idx]) || 0;
-                        const v24 = (r.monthly2024 && r.monthly2024[idx]) || 0;
-                        itemPlanMonthsTd += `
-                            <td class="p-2 text-right border-r border-slate-200 font-mono text-slate-600 hover:bg-blue-100/70 cursor-pointer transition-colors"
-                                data-tooltip-cell="true"
-                                data-tooltip-type="month"
-                                data-tooltip-title="${escapeHtml(r.category.name)}"
-                                data-tooltip-subtitle="${escapeHtml(r.category.b7_display || r.category.b10_display || '')}"
-                                data-tooltip-period="T${m < 10 ? '0' + m : m}/2026"
-                                data-month-num="${m}"
-                                data-val-2026="${val}"
-                                data-val-2025="${v25}"
-                                data-val-2024="${v24}">
-                                ${formatNumber(val)}
-                            </td>
-                        `;
-                    });
-
+                    const activeMonthly = (activeYear === 2025) ? r.monthly2025 : ((activeYear === 2024) ? r.monthly2024 : r.monthly2026);
+                    const activeTotal = (activeYear === 2025) ? r.total2025 : ((activeYear === 2024) ? r.total2024 : r.fullYear2026);
                     const starIcon = r.category.is_material ? '<span class="text-amber-500 font-black mr-1" title="Khoản mục trọng yếu">⭐</span>' : '';
 
-                    let itemLuyKeTd = '';
-                    if (selActual.length > 0) {
-                        itemLuyKeTd = `
+                    let itemDataCells = '';
+                    if (selCount === 1) {
+                        // Kịch bản 1: Chỉ 1 cột duy nhất của tháng được chọn
+                        const m = selectedMonths[0];
+                        const mIdx = m - 1;
+                        const val = (activeMonthly && activeMonthly[mIdx]) || 0;
+                        const v26 = (r.monthly2026 && r.monthly2026[mIdx]) || 0;
+                        const v25 = (r.monthly2025 && r.monthly2025[mIdx]) || 0;
+                        const v24 = (r.monthly2024 && r.monthly2024[mIdx]) || 0;
+                        itemDataCells = `
+                            <td class="p-2 text-right border-r border-slate-200 font-mono font-bold text-[#00529C] bg-blue-50/40 hover:bg-blue-100 cursor-pointer transition-colors"
+                                data-tooltip-cell="true"
+                                data-tooltip-type="month"
+                                data-tooltip-title="${escapeHtml(r.category.name)}"
+                                data-tooltip-subtitle="${escapeHtml(r.category.b7_display || r.category.b10_display || '')}"
+                                data-tooltip-period="T${m < 10 ? '0' + m : m}/${activeYear}"
+                                data-month-num="${m}"
+                                data-val-2026="${v26}"
+                                data-val-2025="${v25}"
+                                data-val-2024="${v24}">
+                                ${formatNumber(val)}
+                            </td>
+                        `;
+                    } else if (selCount < 12) {
+                        // Kịch bản 2: Các tháng được chọn + Đúng 1 cột Lũy kế (KHÔNG có cột Tổng cả năm)
+                        selectedMonths.forEach(m => {
+                            const idx = m - 1;
+                            const val = (activeMonthly && activeMonthly[idx]) || 0;
+                            itemDataCells += `
+                                <td class="p-2 text-right border-r border-slate-200 font-mono hover:bg-blue-100/70 cursor-pointer transition-colors"
+                                    data-tooltip-cell="true"
+                                    data-tooltip-type="month"
+                                    data-tooltip-title="${escapeHtml(r.category.name)}"
+                                    data-tooltip-subtitle="${escapeHtml(r.category.b7_display || r.category.b10_display || '')}"
+                                    data-tooltip-period="T${m < 10 ? '0' + m : m}/${activeYear}"
+                                    data-month-num="${m}"
+                                    data-val-2026="${(r.monthly2026 && r.monthly2026[idx]) || 0}"
+                                    data-val-2025="${(r.monthly2025 && r.monthly2025[idx]) || 0}"
+                                    data-val-2024="${(r.monthly2024 && r.monthly2024[idx]) || 0}">
+                                    ${formatNumber(val)}
+                                </td>
+                            `;
+                        });
+
+                        const itemLuyKe = selectedMonths.reduce((sum, m) => sum + ((activeMonthly && activeMonthly[m - 1]) || 0), 0);
+                        const itemLuyKe26 = selectedMonths.reduce((sum, m) => sum + ((r.monthly2026 && r.monthly2026[m - 1]) || 0), 0);
+                        const itemLuyKe25 = selectedMonths.reduce((sum, m) => sum + ((r.monthly2025 && r.monthly2025[m - 1]) || 0), 0);
+                        const itemLuyKe24 = selectedMonths.reduce((sum, m) => sum + ((r.monthly2024 && r.monthly2024[m - 1]) || 0), 0);
+
+                        itemDataCells += `
                             <td class="p-2 text-right border-r border-slate-200 font-mono font-bold bg-amber-100/70 text-slate-900 hover:bg-amber-200 cursor-pointer transition-colors"
                                 data-tooltip-cell="true"
                                 data-tooltip-type="luyke"
                                 data-tooltip-title="${escapeHtml(r.category.name)}"
                                 data-tooltip-subtitle="${escapeHtml(r.category.b7_display || r.category.b10_display || '')}"
-                                data-tooltip-period="${luyKePeriodLabel}"
-                                data-val-2026="${itemLuỹKế}"
-                                data-val-2025="${itemLuỹKế2025}"
-                                data-val-2024="${itemLuỹKế2024}">
-                                ${formatNumber(itemLuỹKế)}
+                                data-tooltip-period="Lũy kế (${selCount} tháng)"
+                                data-val-2026="${itemLuyKe26}"
+                                data-val-2025="${itemLuyKe25}"
+                                data-val-2024="${itemLuyKe24}">
+                                ${formatNumber(itemLuyKe)}
+                            </td>
+                        `;
+                    } else {
+                        // Kịch bản 3: Đủ 12 tháng + Đúng 1 cột Tổng cả năm (KHÔNG có cột Lũy kế)
+                        for (let i = 0; i < 12; i++) {
+                            const m = i + 1;
+                            const val = (activeMonthly && activeMonthly[i]) || 0;
+                            itemDataCells += `
+                                <td class="p-2 text-right border-r border-slate-200 font-mono hover:bg-blue-100/70 cursor-pointer transition-colors"
+                                    data-tooltip-cell="true"
+                                    data-tooltip-type="month"
+                                    data-tooltip-title="${escapeHtml(r.category.name)}"
+                                    data-tooltip-subtitle="${escapeHtml(r.category.b7_display || r.category.b10_display || '')}"
+                                    data-tooltip-period="T${m < 10 ? '0' + m : m}/${activeYear}"
+                                    data-month-num="${m}"
+                                    data-val-2026="${(r.monthly2026 && r.monthly2026[i]) || 0}"
+                                    data-val-2025="${(r.monthly2025 && r.monthly2025[i]) || 0}"
+                                    data-val-2024="${(r.monthly2024 && r.monthly2024[i]) || 0}">
+                                    ${formatNumber(val)}
+                                </td>
+                            `;
+                        }
+                        itemDataCells += `
+                            <td class="p-2 text-right font-mono font-bold text-[#00529C] bg-blue-50/40 hover:bg-blue-100 cursor-pointer transition-colors"
+                                data-tooltip-cell="true"
+                                data-tooltip-type="fullyear"
+                                data-tooltip-title="${escapeHtml(r.category.name)}"
+                                data-tooltip-subtitle="${escapeHtml(r.category.b7_display || r.category.b10_display || '')}"
+                                data-tooltip-period="Cả năm ${activeYear}"
+                                data-val-2026="${r.fullYear2026}"
+                                data-val-2025="${r.total2025}"
+                                data-val-2024="${r.total2024}">
+                                ${formatNumber(activeTotal)}
                             </td>
                         `;
                     }
@@ -3593,21 +4009,7 @@
                         <td class="p-2 text-left font-semibold text-slate-800 border-r border-slate-200 pl-4">
                             ${starIcon}<span>${escapeHtml(r.category.name)}</span>
                         </td>
-                        ${itemTdCompare}
-                        ${itemActualMonthsTd}
-                        ${itemLuyKeTd}
-                        ${itemPlanMonthsTd}
-                        <td class="p-2 text-right font-mono font-bold text-[#00529C] bg-blue-50/40 hover:bg-blue-100 cursor-pointer transition-colors"
-                            data-tooltip-cell="true"
-                            data-tooltip-type="fullyear"
-                            data-tooltip-title="${escapeHtml(r.category.name)}"
-                            data-tooltip-subtitle="${escapeHtml(r.category.b7_display || r.category.b10_display || '')}"
-                            data-tooltip-period="Cả năm 2026"
-                            data-val-2026="${r.fullYear2026}"
-                            data-val-2025="${r.total2025}"
-                            data-val-2024="${r.total2024}">
-                            ${formatNumber(r.fullYear2026)}
-                        </td>
+                        ${itemDataCells}
                     `;
                     tbody.appendChild(tr);
                 });
@@ -3615,120 +4017,99 @@
         });
 
         // 3. HÀNG TỔNG CỘNG TOÀN BỘ (GRAND TOTAL ROW)
-        const grandLuỹKế = selActual.reduce((sum, m) => sum + (grandMonths[m - 1] || 0), 0);
-        const grandLuỹKế2025 = selActual.reduce((sum, m) => sum + (grandMonths2025[m - 1] || 0), 0);
-        const grandLuỹKế2024 = selActual.reduce((sum, m) => sum + (grandMonths2024[m - 1] || 0), 0);
+        const activeGrandMonths = (activeYear === 2025) ? grandMonths2025 : ((activeYear === 2024) ? grandMonths2024 : grandMonths2026);
+        const activeGrandTotal = (activeYear === 2025) ? grand2025 : ((activeYear === 2024) ? grand2024 : grand2026);
 
         const footerTr = document.createElement('tr');
         footerTr.className = 'bg-[#003870] text-white font-black text-xs border-t-2 border-blue-900 select-none';
 
-        let grandTdCompare = '';
-        if (isShowCompare) {
-            if (compareMode === '2025') {
-                grandTdCompare = `
-                    <td class="p-2 text-right border-r border-blue-800 font-mono text-cyan-200 hover:bg-blue-800 cursor-pointer transition-colors"
-                        data-tooltip-cell="true"
-                        data-tooltip-type="compare"
-                        data-target-year="2025"
-                        data-tooltip-title="TỔNG CỘNG CHI PHÍ TOÀN BỘ"
-                        data-tooltip-subtitle="(Tổng hợp tất cả đơn vị & khoản mục)"
-                        data-tooltip-period="Cả năm 2025"
-                        data-val-2026="${grand2026}"
-                        data-val-2025="${grand2025}"
-                        data-val-2024="${grand2024}">${formatNumber(grand2025)}</td>
-                `;
-            } else if (compareMode === '2024') {
-                grandTdCompare = `
-                    <td class="p-2 text-right border-r border-blue-800 font-mono text-cyan-200 hover:bg-blue-800 cursor-pointer transition-colors"
-                        data-tooltip-cell="true"
-                        data-tooltip-type="compare"
-                        data-target-year="2024"
-                        data-tooltip-title="TỔNG CỘNG CHI PHÍ TOÀN BỘ"
-                        data-tooltip-subtitle="(Tổng hợp tất cả đơn vị & khoản mục)"
-                        data-tooltip-period="Cả năm 2024"
-                        data-val-2026="${grand2026}"
-                        data-val-2025="${grand2025}"
-                        data-val-2024="${grand2024}">${formatNumber(grand2024)}</td>
-                `;
-            } else if (compareMode === 'BOTH') {
-                grandTdCompare = `
-                    <td class="p-2 text-right border-r border-blue-800 font-mono text-cyan-100 hover:bg-blue-800 cursor-pointer transition-colors"
-                        data-tooltip-cell="true"
-                        data-tooltip-type="compare"
-                        data-target-year="2024"
-                        data-tooltip-title="TỔNG CỘNG CHI PHÍ TOÀN BỘ"
-                        data-tooltip-subtitle="(Tổng hợp tất cả đơn vị & khoản mục)"
-                        data-tooltip-period="Cả năm 2024"
-                        data-val-2026="${grand2026}"
-                        data-val-2025="${grand2025}"
-                        data-val-2024="${grand2024}"
-                        title="Cả năm 2024">${formatNumber(grand2024)}</td>
-                    <td class="p-2 text-right border-r border-blue-800 font-mono text-cyan-200 hover:bg-blue-800 cursor-pointer transition-colors"
-                        data-tooltip-cell="true"
-                        data-tooltip-type="compare"
-                        data-target-year="2025"
-                        data-tooltip-title="TỔNG CỘNG CHI PHÍ TOÀN BỘ"
-                        data-tooltip-subtitle="(Tổng hợp tất cả đơn vị & khoản mục)"
-                        data-tooltip-period="Cả năm 2025"
-                        data-val-2026="${grand2026}"
-                        data-val-2025="${grand2025}"
-                        data-val-2024="${grand2024}"
-                        title="Cả năm 2025">${formatNumber(grand2025)}</td>
-                `;
-            }
-        }
-
-        let grandActualMonthsTd = '';
-        selActual.forEach(m => {
-            const idx = m - 1;
-            grandActualMonthsTd += `
-                <td class="p-2 text-right border-r border-blue-800 font-mono hover:bg-blue-800 cursor-pointer transition-colors"
+        let grandDataCells = '';
+        if (selCount === 1) {
+            // Kịch bản 1: Chỉ 1 cột duy nhất của tháng được chọn
+            const m = selectedMonths[0];
+            const mIdx = m - 1;
+            grandDataCells = `
+                <td class="p-2 text-right font-mono font-black bg-[#059669] text-[#FFFFD4] hover:bg-emerald-600 cursor-pointer transition-colors"
                     data-tooltip-cell="true"
                     data-tooltip-type="month"
                     data-tooltip-title="TỔNG CỘNG CHI PHÍ TOÀN BỘ"
                     data-tooltip-subtitle="(Tổng hợp tất cả đơn vị & khoản mục)"
-                    data-tooltip-period="T${m < 10 ? '0' + m : m}/2026"
+                    data-tooltip-period="T${m < 10 ? '0' + m : m}/${activeYear}"
                     data-month-num="${m}"
-                    data-val-2026="${grandMonths[idx]}"
-                    data-val-2025="${grandMonths2025[idx]}"
-                    data-val-2024="${grandMonths2024[idx]}">
-                    ${formatNumber(grandMonths[idx])}
+                    data-val-2026="${grandMonths2026[mIdx]}"
+                    data-val-2025="${grandMonths2025[mIdx]}"
+                    data-val-2024="${grandMonths2024[mIdx]}">
+                    ${formatNumber(activeGrandMonths[mIdx])}
                 </td>
             `;
-        });
+        } else if (selCount < 12) {
+            // Kịch bản 2: Các tháng được chọn + Đúng 1 cột Lũy kế (KHÔNG có cột Tổng cả năm)
+            selectedMonths.forEach(m => {
+                const idx = m - 1;
+                grandDataCells += `
+                    <td class="p-2 text-right border-r border-blue-800 font-mono hover:bg-blue-800 cursor-pointer transition-colors"
+                        data-tooltip-cell="true"
+                        data-tooltip-type="month"
+                        data-tooltip-title="TỔNG CỘNG CHI PHÍ TOÀN BỘ"
+                        data-tooltip-subtitle="(Tổng hợp tất cả đơn vị & khoản mục)"
+                        data-tooltip-period="T${m < 10 ? '0' + m : m}/${activeYear}"
+                        data-month-num="${m}"
+                        data-val-2026="${grandMonths2026[idx]}"
+                        data-val-2025="${grandMonths2025[idx]}"
+                        data-val-2024="${grandMonths2024[idx]}">
+                        ${formatNumber(activeGrandMonths[idx])}
+                    </td>
+                `;
+            });
 
-        let grandPlanMonthsTd = '';
-        selPlan.forEach(m => {
-            const idx = m - 1;
-            grandPlanMonthsTd += `
-                <td class="p-2 text-right border-r border-blue-800 font-mono text-cyan-100 hover:bg-blue-800 cursor-pointer transition-colors"
-                    data-tooltip-cell="true"
-                    data-tooltip-type="month"
-                    data-tooltip-title="TỔNG CỘNG CHI PHÍ TOÀN BỘ"
-                    data-tooltip-subtitle="(Tổng hợp tất cả đơn vị & khoản mục)"
-                    data-tooltip-period="T${m < 10 ? '0' + m : m}/2026"
-                    data-month-num="${m}"
-                    data-val-2026="${grandMonths[idx]}"
-                    data-val-2025="${grandMonths2025[idx]}"
-                    data-val-2024="${grandMonths2024[idx]}">
-                    ${formatNumber(grandMonths[idx])}
-                </td>
-            `;
-        });
+            const grandLuyKe = selectedMonths.reduce((sum, m) => sum + (activeGrandMonths[m - 1] || 0), 0);
+            const grandLuyKe26 = selectedMonths.reduce((sum, m) => sum + (grandMonths2026[m - 1] || 0), 0);
+            const grandLuyKe25 = selectedMonths.reduce((sum, m) => sum + (grandMonths2025[m - 1] || 0), 0);
+            const grandLuyKe24 = selectedMonths.reduce((sum, m) => sum + (grandMonths2024[m - 1] || 0), 0);
 
-        let grandLuyKeTd = '';
-        if (selActual.length > 0) {
-            grandLuyKeTd = `
+            grandDataCells += `
                 <td class="p-2 text-right border-r border-blue-800 font-mono bg-amber-400 text-slate-950 font-black hover:bg-amber-300 cursor-pointer transition-colors"
                     data-tooltip-cell="true"
                     data-tooltip-type="luyke"
                     data-tooltip-title="TỔNG CỘNG CHI PHÍ TOÀN BỘ"
                     data-tooltip-subtitle="(Tổng hợp tất cả đơn vị & khoản mục)"
-                    data-tooltip-period="${luyKePeriodLabel}"
-                    data-val-2026="${grandLuỹKế}"
-                    data-val-2025="${grandLuỹKế2025}"
-                    data-val-2024="${grandLuỹKế2024}">
-                    ${formatNumber(grandLuỹKế)}
+                    data-tooltip-period="Lũy kế (${selCount} tháng)"
+                    data-val-2026="${grandLuyKe26}"
+                    data-val-2025="${grandLuyKe25}"
+                    data-val-2024="${grandLuyKe24}">
+                    ${formatNumber(grandLuyKe)}
+                </td>
+            `;
+        } else {
+            // Kịch bản 3: Đủ 12 tháng + Đúng 1 cột Tổng cả năm (KHÔNG có cột Lũy kế)
+            for (let i = 0; i < 12; i++) {
+                const m = i + 1;
+                grandDataCells += `
+                    <td class="p-2 text-right border-r border-blue-800 font-mono hover:bg-blue-800 cursor-pointer transition-colors"
+                        data-tooltip-cell="true"
+                        data-tooltip-type="month"
+                        data-tooltip-title="TỔNG CỘNG CHI PHÍ TOÀN BỘ"
+                        data-tooltip-subtitle="(Tổng hợp tất cả đơn vị & khoản mục)"
+                        data-tooltip-period="T${m < 10 ? '0' + m : m}/${activeYear}"
+                        data-month-num="${m}"
+                        data-val-2026="${grandMonths2026[i]}"
+                        data-val-2025="${grandMonths2025[i]}"
+                        data-val-2024="${grandMonths2024[i]}">
+                        ${formatNumber(activeGrandMonths[i])}
+                    </td>
+                `;
+            }
+            grandDataCells += `
+                <td class="p-2 text-right font-mono font-black bg-[#059669] text-[#FFFFD4] hover:bg-emerald-600 cursor-pointer transition-colors"
+                    data-tooltip-cell="true"
+                    data-tooltip-type="fullyear"
+                    data-tooltip-title="TỔNG CỘNG CHI PHÍ TOÀN BỘ"
+                    data-tooltip-subtitle="(Tổng hợp tất cả đơn vị & khoản mục)"
+                    data-tooltip-period="Cả năm ${activeYear}"
+                    data-val-2026="${grand2026}"
+                    data-val-2025="${grand2025}"
+                    data-val-2024="${grand2024}">
+                    ${formatNumber(activeGrandTotal)}
                 </td>
             `;
         }
@@ -3738,21 +4119,7 @@
             <td class="p-2 text-center border-r border-blue-800">-</td>
             <td class="p-2 text-center border-r border-blue-800">-</td>
             <td class="p-2 text-left uppercase tracking-wider border-r border-blue-800 pl-4 text-[#FFFFD4]">TỔNG CỘNG CHI PHÍ</td>
-            ${grandTdCompare}
-            ${grandActualMonthsTd}
-            ${grandLuyKeTd}
-            ${grandPlanMonthsTd}
-            <td class="p-2 text-right font-mono font-black bg-[#059669] text-[#FFFFD4] hover:bg-emerald-600 cursor-pointer transition-colors"
-                data-tooltip-cell="true"
-                data-tooltip-type="fullyear"
-                data-tooltip-title="TỔNG CỘNG CHI PHÍ TOÀN BỘ"
-                data-tooltip-subtitle="(Tổng hợp tất cả đơn vị & khoản mục)"
-                data-tooltip-period="Cả năm 2026"
-                data-val-2026="${grand2026}"
-                data-val-2025="${grand2025}"
-                data-val-2024="${grand2024}">
-                ${formatNumber(grand2026)}
-            </td>
+            ${grandDataCells}
         `;
         tbody.appendChild(footerTr);
     }
@@ -4367,7 +4734,7 @@
             groups.forEach(key => {
                 const grp = groupMap[key];
                 const grpMatch = grp.maQt.toLowerCase().includes(q) || grp.tenQt.toLowerCase().includes(q) || grp.khoi.toLowerCase().includes(q);
-                const matchingItems = grp.items.filter(item => 
+                const matchingItems = grp.items.filter(item =>
                     grpMatch ||
                     (item.row.maPn && item.row.maPn.toLowerCase().includes(q)) ||
                     (item.row.tenPn && item.row.tenPn.toLowerCase().includes(q))
@@ -4409,7 +4776,7 @@
                 const q = searchFilter.toLowerCase().trim();
                 const grpMatch = grp.maQt.toLowerCase().includes(q) || grp.tenQt.toLowerCase().includes(q) || grp.khoi.toLowerCase().includes(q);
                 if (!grpMatch) {
-                    items = items.filter(item => 
+                    items = items.filter(item =>
                         (item.row.maPn && item.row.maPn.toLowerCase().includes(q)) ||
                         (item.row.tenPn && item.row.tenPn.toLowerCase().includes(q))
                     );
@@ -4663,10 +5030,10 @@
                 saveCurrentState();
                 renderQtpnTab();
                 if (showSuccessAlert) {
-                    alert(`Đã tải thành công ${data.qtpnMappings.length} dòng ánh xạ từ Database DM_QTPN và cập nhật tổng hợp chi phí!`);
+                    alert(`Đã tải thành công ${data.qtpnMappings.length} dòng ánh xạ từ Google Sheet DM_QTPN và cập nhật tổng hợp chi phí!`);
                 }
             } else {
-                alert('Lỗi tải DM_QTPN từ Database: ' + (data.message || 'Không có dữ liệu.'));
+                alert('Lỗi tải DM_QTPN từ Google Sheet: ' + (data.message || 'Không có dữ liệu.'));
             }
         } catch (e) {
             alert('Không thể kết nối đến Google Apps Script (DM_QTPN): ' + e.message);
@@ -4702,35 +5069,35 @@
                     alert(data.message || `Đã đẩy thành công ${state.qtpnMappings.length} dòng ánh xạ lên sheet DM_QTPN!`);
                 }
             } else {
-                alert('Lỗi khi lưu lên Database DM_QTPN: ' + data.message);
+                alert('Lỗi khi lưu lên Google Sheet DM_QTPN: ' + data.message);
             }
         } catch (e) {
-            alert('Lỗi khi gửi dữ liệu lên Database: ' + e.message);
+            alert('Lỗi khi gửi dữ liệu lên Google Sheet: ' + e.message);
         }
     }
 
     // Attach global handlers for inline onclick buttons
-    window.editQtpnRow = function(idx) {
+    window.editQtpnRow = function (idx) {
         openQtpnModal(idx);
     };
 
-    window.deleteQtpnRow = function(idx) {
+    window.deleteQtpnRow = function (idx) {
         deleteQtpnRowInternal(idx);
     };
 
-    window.editQtpnGroup = function(maQt, tenQt) {
+    window.editQtpnGroup = function (maQt, tenQt) {
         editQtpnGroupPrompt(maQt, tenQt);
     };
 
-    window.deleteQtpnGroup = function(maQt) {
+    window.deleteQtpnGroup = function (maQt) {
         deleteQtpnGroupPrompt(maQt);
     };
 
-    window.openAddQtpnItemForGroup = function(maQt, tenQt, khoi) {
+    window.openAddQtpnItemForGroup = function (maQt, tenQt, khoi) {
         openAddQtpnItemForGroup(maQt, tenQt, khoi);
     };
 
-    window.moveQtpnBySelect = function(idx, val) {
+    window.moveQtpnBySelect = function (idx, val) {
         if (!val || !val.includes('|||')) return;
         const parts = val.split('|||');
         const maQt = parts[0];
@@ -4826,8 +5193,8 @@
             state.cbnvRecords = [];
         }
 
-        const entRecords = state.cbnvRecords.filter(r => 
-            (r.maPn === code || r.code === code) && 
+        const entRecords = state.cbnvRecords.filter(r =>
+            (r.maPn === code || r.code === code) &&
             (parseInt(r.nam || r.year || 2026, 10) === parseInt(year, 10))
         );
 
@@ -5434,7 +5801,7 @@
                 const tT = Number(cbnv.thucTe) || 0;
                 const dB = Number(cbnv.dinhBien) || 0;
                 const c26 = getEntityCostTrD(code, '2026', isSingleMonth ? currentMonthNum : 'ALL');
-                
+
                 let rateTt = 0;
                 let rateDb = 0;
                 if (isSingleMonth) {
@@ -5525,7 +5892,7 @@
                         },
                         tooltip: {
                             callbacks: {
-                                label: function(context) {
+                                label: function (context) {
                                     const rawVal = context.raw || 0;
                                     const mVal = (rawVal / 12).toFixed(2);
                                     return `${context.dataset.label}: ${rawVal.toLocaleString('vi-VN')} Tr.đ/năm (${mVal} Tr.đ/tháng)`;
@@ -5606,7 +5973,7 @@
                         legend: { display: false },
                         tooltip: {
                             callbacks: {
-                                label: function(context) {
+                                label: function (context) {
                                     const p = scatterPoints[context.dataIndex];
                                     return [
                                         `🏢 ${p.label} [${p.khoi}]`,
@@ -5678,7 +6045,7 @@
         }
 
         const reader = new FileReader();
-        reader.onload = function(e) {
+        reader.onload = function (e) {
             try {
                 const data = new Uint8Array(e.target.result);
                 const workbook = XLSX.read(data, { type: 'array' });
@@ -5959,7 +6326,7 @@
             const thang = item.thang || 7;
             const key = (String(code).trim() + '_' + nam + '_' + thang).toUpperCase();
 
-            const existIdx = state.cbnvRecords.findIndex(r => 
+            const existIdx = state.cbnvRecords.findIndex(r =>
                 (String(r.maPn || r.code).trim() + '_' + (r.nam || 2026) + '_' + (r.thang || 1)).toUpperCase() === key
             );
 
@@ -6002,10 +6369,10 @@
         const modeText = uploadMode === 'overwrite' ? 'Ghi đè toàn bộ danh mục' : 'Ghi thêm / Cập nhật theo từng tháng';
         alert(`✅ CẬP NHẬT THÀNH CÔNG!\nĐã nạp ${updateCount} dòng nhân sự (Chế độ: ${modeText}).\nTổng số bản ghi trong bộ nhớ: ${state.cbnvRecords.length} dòng.`);
 
-        // Đề xuất đồng bộ lên Database nếu có kết nối
+        // Đề xuất đồng bộ lên Google Sheet nếu có kết nối
         const gsheetCfg = getGoogleSheetSyncConfig();
         if (gsheetCfg && gsheetCfg.webAppUrl) {
-            if (confirm(`Anh/Chị có muốn đồng bộ danh mục nhân sự mới này lên Database DM_CBNV không? (Chế độ: ${uploadMode === 'overwrite' ? 'Ghi đè' : 'Ghi thêm/Cập nhật'})`)) {
+            if (confirm(`Anh/Chị có muốn đồng bộ danh mục nhân sự mới này lên Google Sheet DM_CBNV không? (Chế độ: ${uploadMode === 'overwrite' ? 'Ghi đè' : 'Ghi thêm/Cập nhật'})`)) {
                 pushCbnvToGoogleSheet(true, uploadMode);
             }
         }
@@ -6175,7 +6542,7 @@
     }
 
     /**
-     * Đẩy danh mục định biên & nhân sự CB-NV lên Database DM_CBNV (11 Cột)
+     * Đẩy danh mục định biên & nhân sự CB-NV lên Google Sheet DM_CBNV (11 Cột)
      */
     async function pushCbnvToGoogleSheet(showSuccessAlert = true, mode = 'upsert') {
         const config = getGoogleSheetSyncConfig();
@@ -6185,7 +6552,7 @@
         }
 
         ensureBaselineCbnvData();
-        const cbnvRecordsToSend = (state.cbnvRecords && state.cbnvRecords.length > 0) ? 
+        const cbnvRecordsToSend = (state.cbnvRecords && state.cbnvRecords.length > 0) ?
             state.cbnvRecords : Object.values(state.cbnvData);
 
         try {
@@ -6211,15 +6578,15 @@
                     alert(data.message || `Đã đẩy thành công ${cbnvRecordsToSend.length} dòng nhân sự lên sheet DM_CBNV!`);
                 }
             } else {
-                alert('Lỗi khi lưu lên Database DM_CBNV: ' + (data.message || 'Không thành công'));
+                alert('Lỗi khi lưu lên Google Sheet DM_CBNV: ' + (data.message || 'Không thành công'));
             }
         } catch (e) {
-            alert('Lỗi khi gửi dữ liệu nhân sự lên Database: ' + e.message);
+            alert('Lỗi khi gửi dữ liệu nhân sự lên Google Sheet: ' + e.message);
         }
     }
 
     /**
-     * Tải danh mục định biên & nhân sự CB-NV từ Database DM_CBNV (11 Cột)
+     * Tải danh mục định biên & nhân sự CB-NV từ Google Sheet DM_CBNV (11 Cột)
      */
     async function syncCbnvFromGoogleSheet(showSuccessAlert = true) {
         const config = getGoogleSheetSyncConfig();
@@ -6252,10 +6619,10 @@
                 saveCurrentState();
                 renderCbnvTab();
                 if (showSuccessAlert) {
-                    alert(`Đã tải thành công ${data.cbnvData.length} dòng nhân sự (11 cột) từ Database DM_CBNV!`);
+                    alert(`Đã tải thành công ${data.cbnvData.length} dòng nhân sự (11 cột) từ Google Sheet DM_CBNV!`);
                 }
             } else {
-                alert('Lỗi tải DM_CBNV từ Database: ' + (data.message || 'Không có dữ liệu.'));
+                alert('Lỗi tải DM_CBNV từ Google Sheet: ' + (data.message || 'Không có dữ liệu.'));
             }
         } catch (e) {
             alert('Không thể kết nối đến Google Apps Script (DM_CBNV): ' + e.message);
@@ -6263,7 +6630,7 @@
     }
 
     /**
-     * Hộp thoại tương tác đồng bộ 2 chiều DM_CBNV với Database
+     * Hộp thoại tương tác đồng bộ 2 chiều DM_CBNV với Google Sheet
      */
     function handleSyncCbnvWithGoogleSheetPrompt() {
         const config = getGoogleSheetSyncConfig();
@@ -6273,7 +6640,7 @@
             return;
         }
 
-        const choice = prompt('ĐỒNG BỘ DANH MỤC NHÂN SỰ CB-NV (DM_CBNV):\n\n- Gõ 1: Đẩy dữ liệu hiện tại lên Database DM_CBNV\n- Gõ 2: Tải dữ liệu mới nhất từ Database DM_CBNV về máy', '1');
+        const choice = prompt('ĐỒNG BỘ DANH MỤC NHÂN SỰ CB-NV (DM_CBNV):\n\n- Gõ 1: Đẩy dữ liệu hiện tại lên Google Sheet DM_CBNV\n- Gõ 2: Tải dữ liệu mới nhất từ Google Sheet DM_CBNV về máy', '1');
         if (choice === '1') {
             pushCbnvToGoogleSheet(true);
         } else if (choice === '2') {
@@ -6817,10 +7184,9 @@
                 } else if (entityCode === 'C1101' || entityName.toUpperCase().includes('THACO AUTO')) {
                     targetSheet = 'CP_AUTO';
                 } else if (entityName.toUpperCase().includes('NHÀ MÁY') || entityName.toUpperCase().includes('CHU LAI')) {
-                    targetSheet = 'CP_NHAMAY';
-                } else if (entityName.toUpperCase().includes('MIỀN BẮC') || entityName.toUpperCase().includes('BẮC')) {
-                    targetSheet = 'CP_CTTT_MB';
+                    targetSheet = 'CP_NM';
                 } else {
+                    // Tất cả Công ty Tỉnh Thành (Phía Bắc & Phía Nam) gộp chung vào CP_CTTT
                     targetSheet = 'CP_CTTT';
                 }
 
@@ -7050,12 +7416,16 @@
                 const newActualMonths = [];
                 for (let m = 1; m <= maxMonth; m++) newActualMonths.push(m);
                 state.actualMonths = newActualMonths;
+                if (isActualYtdMode()) {
+                    state.selectedMonths = [...newActualMonths];
+                    state.selectedPeriod = 'YTD';
+                }
             }
 
             // 5. Lưu phiên vào localStorage
             saveCurrentState();
 
-            // 6. Đồng bộ lên Database nếu được chọn
+            // 6. Đồng bộ lên Google Sheet nếu được chọn
             let gsheetMsg = '';
             if (shouldSyncGsheet) {
                 const config = getGoogleSheetSyncConfig();
@@ -7063,17 +7433,17 @@
                     try {
                         const gRes = await pushCleanCostDataToGoogleSheet(targetSheet, cleanRows, entCode, year);
                         if (gRes && gRes.status === 'success') {
-                            gsheetMsg = `\n- Database (${targetSheet}): ${gRes.message}`;
-                            console.log('Tự động tải lại dữ liệu mới nhất từ Database...');
+                            gsheetMsg = `\n- Google Sheet (${targetSheet}): ${gRes.message}`;
+                            console.log('Tự động tải lại dữ liệu mới nhất từ Google Sheet...');
                             await syncFromGoogleSheet(false);
                         } else {
-                            gsheetMsg = `\n- Database (${targetSheet}): ${gRes?.message || 'Chưa đồng bộ được'}`;
+                            gsheetMsg = `\n- Google Sheet (${targetSheet}): ${gRes?.message || 'Chưa đồng bộ được'}`;
                         }
                     } catch (gErr) {
-                        gsheetMsg = `\n- Database: Lỗi kết nối (${gErr.message})`;
+                        gsheetMsg = `\n- Google Sheet: Lỗi kết nối (${gErr.message})`;
                     }
                 } else {
-                    gsheetMsg = '\n- Database: Chưa cấu hình Web App URL nên chưa đẩy lên Sheet.';
+                    gsheetMsg = '\n- Google Sheet: Chưa cấu hình Web App URL nên chưa đẩy lên Sheet.';
                 }
             }
 
@@ -7086,7 +7456,7 @@
             if (uploadModal) uploadModal.classList.add('hidden');
             cancelUploadPreview();
 
-            alert(`✅ NẠP DỮ LIỆU THÀNH CÔNG!\n- Đơn vị: ${entCode} - ${entName}\n- Năm tài chính: ${year} (${ky})\n- Số dòng chi phí: ${rowCount} dòng\n- Tổng tiền: ${totalMoney.toLocaleString('vi-VN')} đ\n- Dữ liệu đã được lưu và cập nhật trực tiếp từ Database!${gsheetMsg}`);
+            alert(`✅ NẠP DỮ LIỆU THÀNH CÔNG!\n- Đơn vị: ${entCode} - ${entName}\n- Năm tài chính: ${year} (${ky})\n- Số dòng chi phí: ${rowCount} dòng\n- Tổng tiền: ${totalMoney.toLocaleString('vi-VN')} đ\n- Dữ liệu đã được lưu và cập nhật trực tiếp từ Google Sheet!${gsheetMsg}`);
 
         } catch (err) {
             console.error(err);
@@ -7141,13 +7511,13 @@
             return;
         }
 
-        const confirmed = confirm(`Hệ thống sẽ đẩy toàn bộ dữ liệu chi phí sạch của THACO AUTO (C1101) lên Database CP_AUTO:\n- Năm 2025: ${d25.length} dòng (27,094,469,647 đ)\n- Năm 2026: ${d26.length} dòng (6,671,614,840 đ)\n\nAnh/Chị có muốn tiếp tục?`);
+        const confirmed = confirm(`Hệ thống sẽ đẩy toàn bộ dữ liệu chi phí sạch của THACO AUTO (C1101) lên Google Sheet CP_AUTO:\n- Năm 2025: ${d25.length} dòng (27,094,469,647 đ)\n- Năm 2026: ${d26.length} dòng (6,671,614,840 đ)\n\nAnh/Chị có muốn tiếp tục?`);
         if (!confirmed) return;
 
         const btn = document.getElementById('btn-sync-c1101-to-gsheet');
         if (btn) {
             btn.disabled = true;
-            btn.innerHTML = '<span>⏳ Đang đẩy dữ liệu lên Database CP_AUTO...</span>';
+            btn.innerHTML = '<span>⏳ Đang đẩy dữ liệu lên Google Sheet CP_AUTO...</span>';
         }
 
         try {
@@ -7161,10 +7531,10 @@
                 res26 = await pushCleanCostDataToGoogleSheet('CP_AUTO', d26, 'C1101', 2026);
             }
 
-            alert(`🎉 ĐỒNG BỘ THÀNH CÔNG LÊN SHEET CP_AUTO!\n- Năm 2025: ${d25.length} dòng\n- Năm 2026: ${d26.length} dòng\nDatabase đã tự động tạo bảng, định dạng màu THACO Royal Blue và căn chỉnh số liệu chuẩn xác!`);
+            alert(`🎉 ĐỒNG BỘ THÀNH CÔNG LÊN SHEET CP_AUTO!\n- Năm 2025: ${d25.length} dòng\n- Năm 2026: ${d26.length} dòng\nGoogle Sheet đã tự động tạo bảng, định dạng màu THACO Royal Blue và căn chỉnh số liệu chuẩn xác!`);
         } catch (err) {
             console.error(err);
-            alert('Lỗi đồng bộ lên Database CP_AUTO: ' + err.message);
+            alert('Lỗi đồng bộ lên Google Sheet CP_AUTO: ' + err.message);
         } finally {
             if (btn) {
                 btn.disabled = false;
@@ -7178,6 +7548,7 @@
     // ==========================================
 
     function renderAll() {
+        renderPeriodPickerUI();
         renderTable();
         if (state.currentTab === 'dashboard') {
             renderDashboardCharts();
@@ -7199,16 +7570,16 @@
         return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
     }
 
-    window.THACO_APP = { 
-        state, 
-        processGoogleSheetData, 
-        syncFromGoogleSheet, 
-        calculateReportData, 
-        resetToBaseline, 
-        openUploadModal, 
-        openCbnvUploadModal, 
-        renderCbnvTab, 
-        setCbnvDisplayMode, 
+    window.THACO_APP = {
+        state,
+        processGoogleSheetData,
+        syncFromGoogleSheet,
+        calculateReportData,
+        resetToBaseline,
+        openUploadModal,
+        openCbnvUploadModal,
+        renderCbnvTab,
+        setCbnvDisplayMode,
         init,
         checkUrlConnectionParams,
         getGoogleSheetSyncConfig,

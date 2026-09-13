@@ -266,11 +266,11 @@
                 const isActual = parseInt(targetCell.getAttribute('data-month-num') || targetCell.dataset.monthNum || '0', 10) <= 7;
                 typeBadge = isActual
                     ? '<span class="px-2 py-0.5 rounded text-[9px] font-black bg-emerald-950 text-emerald-300 border border-emerald-700/60 shadow-xs">Thực tế 2026</span>'
-                    : `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-bold bg-purple-950/90 text-purple-300 border border-purple-700/60 shadow-xs" title="Mô hình AI Gemini dự báo">
+                    : `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-bold bg-purple-950/90 text-purple-300 border border-purple-700/60 shadow-xs" title="Mô hình AI Dự phóng">
                         <svg class="w-3 h-3 text-purple-400 shrink-0" viewBox="0 0 24 24" fill="currentColor">
                             <path d="M19 9l1.25-2.75L23 5l-2.75-1.25L19 1l-1.25 2.75L15 5l2.75 1.25L19 9zm-7.5.5L9 4 6.5 9.5 1 12l5.5 2.5L9 20l2.5-5.5L17 12l-5.5-2.5zM19 15l-1.25 2.75L15 19l2.75 1.25L19 23l1.25-2.75L23 19l-2.75-1.25L19 15z"/>
                         </svg>
-                        <span>AI Gemini Dự báo</span>
+                        <span>AI Dự phóng</span>
                        </span>`;
             } else if (type === 'luyke') {
                 typeBadge = `<span class="px-2 py-0.5 rounded text-[9px] font-black bg-amber-950 text-amber-300 border border-amber-700/60 shadow-xs">${period || 'Luỹ kế'}</span>`;

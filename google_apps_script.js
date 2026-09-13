@@ -6,10 +6,12 @@
  * 
  * Các Sheet quản lý:
  * 1. DM_CPHC : Cấu hình danh mục phí, mã B7, mã B10, Nhóm phí, Trọng yếu (⭐)
- * 2. DM_QTPN : Danh mục ánh xạ Quản trị ↔ Pháp nhân (TT, Mã QT, Tên QT, Mã PN, Tên PN)
- * 3. CP_AUTO : Toàn bộ dữ liệu chi phí hành chính THACO AUTO (C1101 - VPĐH)
- * 4. CP_PP   : Dữ liệu chi phí hành chính Phân Phối THACO AUTO
- * 5. CP_CTTT : Dữ liệu chi phí hành chính các Công ty Tỉnh Thành / Chi nhánh
+ * 2. DM_QTPN : Danh mục ánh xạ Quản trị ↔ Pháp nhân (TT, Đơn vị, Mã QT, Tên QT, Mã PN, Tên PN)
+ * 3. DM_CBNV : Định biên & Nhân sự CB-NV theo từng pháp nhân
+ * 4. CP_AUTO : Toàn bộ dữ liệu chi phí hành chính THACO AUTO (C1101 - VPĐH)
+ * 5. CP_PP   : Dữ liệu chi phí hành chính Phân Phối THACO AUTO (C2305 - VPĐH)
+ * 6. CP_NM   : Dữ liệu chi phí hành chính Khối Nhà máy Chu Lai
+ * 7. CP_CTTT : Dữ liệu chi phí hành chính các Công ty Tỉnh Thành (Phía Bắc & Phía Nam)
  * =========================================================================================
  * 
  * HƯỚNG DẪN TRIỂN KHAI / CẬP NHẬT (MẤT 1 PHÚT):
@@ -28,7 +30,7 @@
 var SHEET_DM_CPHC = 'DM_CPHC';
 var SHEET_DM_QTPN = 'DM_QTPN';
 var SHEET_DM_CBNV = 'DM_CBNV';
-var COST_SHEETS = ['CP_AUTO', 'CP_PP', 'CP_CTTT', 'CP_VPDH', 'CP_NHAMAY', 'CP_CTTT_MB', 'CP_CTTT_MN'];
+var COST_SHEETS = ['CP_AUTO', 'CP_PP', 'CP_NM', 'CP_CTTT'];
 
 var CBNV_COLUMNS = [
   'STT',
@@ -107,13 +109,14 @@ function onOpen() {
     .addItem('🔄 Kiểm tra cấu trúc DM_CPHC', 'checkDmStructure')
     .addItem('✨ Chuẩn hóa định dạng DM_CPHC', 'formatDmSheet')
     .addSeparator()
-    .addItem('🔄 Kiểm tra cấu trúc DM_QTPN', 'checkDmQtpnStructure')
+    .addItem('🔍 Kiểm toán Cột B (Đơn vị) trong DM_QTPN', 'auditDmQtpnColumnB')
+    .addItem('⚡ Tự động chuẩn hóa 100% Cột B về 4 giá trị chuẩn', 'normalizeDmQtpnColumnB')
     .addItem('✨ Chuẩn hóa định dạng DM_QTPN', 'formatDmQtpnSheet')
     .addSeparator()
     .addItem('🔄 Kiểm tra cấu trúc DM_CBNV', 'checkDmCbnvStructure')
     .addItem('✨ Chuẩn hóa định dạng DM_CBNV', 'formatDmCbnvSheet')
     .addSeparator()
-    .addItem('📊 Khởi tạo cấu trúc các Sheet Chi phí (CP_AUTO, CP_PP, CP_CTTT)', 'initCostSheets')
+    .addItem('📊 Khởi tạo cấu trúc các Sheet Chi phí (CP_AUTO, CP_PP, CP_NM, CP_CTTT)', 'initCostSheets')
     .addItem('✨ Chuẩn hóa định dạng các Sheet Chi phí', 'formatAllCostSheets')
     .addToUi();
 }
@@ -194,6 +197,11 @@ function doGet(e) {
       return handleGetDmQtpn();
     }
 
+    // Trường hợp 3b: Kiểm toán Cột B (Đơn vị) của DM_QTPN
+    if (action === 'audit_qtpn') {
+      return handleAuditDmQtpn();
+    }
+
     // Trường hợp 4: Đọc riêng Danh mục Định biên / Nhân sự DM_CBNV
     if (action === 'get_cbnv') {
       return handleGetDmCbnv();
@@ -248,6 +256,11 @@ function doPost(e) {
       return handleSaveDmQtpn(payload);
     }
 
+    // Trường hợp 2b: Chuẩn hóa trực tiếp Cột B của DM_QTPN
+    if (payload.action === 'normalize_qtpn') {
+      return handleNormalizeDmQtpn();
+    }
+
     // Trường hợp 3: Ghi danh mục Định biên / Nhân sự DM_CBNV
     if (payload.action === 'save_cbnv' || payload.cbnvData) {
       return handleSaveDmCbnv(payload);
@@ -285,7 +298,7 @@ function handleGetAllData() {
   var costSheets = {};
   var allCostRows = [];
 
-  COST_SHEETS.forEach(function(sName) {
+  COST_SHEETS.forEach(function (sName) {
     var sRows = readSheetCostRows(ss, sName);
     costSheets[sName] = sRows;
     allCostRows = allCostRows.concat(sRows);
@@ -338,7 +351,7 @@ function readDmCategories(ss) {
 
   for (var r = 1; r < data.length; r++) {
     var row = data[r];
-    if (!row || row.every(function(cell) { return cell === '' || cell === null; })) continue;
+    if (!row || row.every(function (cell) { return cell === '' || cell === null; })) continue;
 
     var nameVal = String(row[colMap.name] || '').trim();
     var b7Val = String(row[colMap.b7] || '').trim();
@@ -355,8 +368,8 @@ function readDmCategories(ss) {
     if (grpVal) currentGroup = grpVal;
     if (!b7Val && !b10Val && !nameVal) continue;
 
-    var b7Codes = b7Val ? b7Val.split(/[,;\s]+/).map(function(s){ return s.trim(); }).filter(Boolean) : [];
-    var b10Codes = b10Val ? b10Val.split(/[,;\s]+/).map(function(s){ return s.trim(); }).filter(Boolean) : [];
+    var b7Codes = b7Val ? b7Val.split(/[,;\s]+/).map(function (s) { return s.trim(); }).filter(Boolean) : [];
+    var b10Codes = b10Val ? b10Val.split(/[,;\s]+/).map(function (s) { return s.trim(); }).filter(Boolean) : [];
 
     categories.push({
       id: r,
@@ -389,7 +402,7 @@ function readSheetCostRows(ss, sheetName) {
 
   for (var r = 1; r < data.length; r++) {
     var raw = data[r];
-    if (!raw || raw.every(function(c) { return c === '' || c === null; })) continue;
+    if (!raw || raw.every(function (c) { return c === '' || c === null; })) continue;
 
     var item = {};
     for (var c = 0; c < headers.length; c++) {
@@ -443,7 +456,7 @@ function handleSaveDmCphc(payload) {
   ];
 
   var rows = [headerRow];
-  categories.forEach(function(cat, index) {
+  categories.forEach(function (cat, index) {
     var b7Text = cat.b7_display || (cat.b7_codes ? cat.b7_codes.join(', ') : '');
     var b10Text = cat.b10_display || (cat.b10_codes ? cat.b10_codes.join(', ') : '');
     var tt = cat.tt || (index + 1);
@@ -457,10 +470,10 @@ function handleSaveDmCphc(payload) {
 
   var headerRange = sheet.getRange(1, 1, 1, 6);
   headerRange.setBackground('#00529C')
-             .setFontColor('#FFFFFF')
-             .setFontWeight('bold')
-             .setHorizontalAlignment('center')
-             .setVerticalAlignment('middle');
+    .setFontColor('#FFFFFF')
+    .setFontWeight('bold')
+    .setHorizontalAlignment('center')
+    .setVerticalAlignment('middle');
   sheet.setRowHeight(1, 35);
 
   if (rows.length > 1) {
@@ -505,7 +518,7 @@ function readDmQtpn(ss) {
   var data = sheet.getDataRange().getValues();
   if (data.length <= 1) return [];
 
-  var headers = data[0].map(function(h) { return String(h || '').trim().toLowerCase(); });
+  var headers = data[0].map(function (h) { return String(h || '').trim().toLowerCase(); });
   var colMap = { tt: 0, khoi: -1, maQt: -1, tenQt: -1, maPn: -1, tenPn: -1 };
 
   for (var c = 0; c < headers.length; c++) {
@@ -528,9 +541,23 @@ function readDmQtpn(ss) {
   var mappings = [];
   for (var r = 1; r < data.length; r++) {
     var row = data[r];
-    if (!row || row.every(function(cell) { return cell === '' || cell === null; })) continue;
+    if (!row || row.every(function (cell) { return cell === '' || cell === null; })) continue;
 
-    var khoi = colMap.khoi !== -1 ? String(row[colMap.khoi] || '').trim() : 'VPĐH';
+    var rawKhoi = colMap.khoi !== -1 ? String(row[colMap.khoi] || '').trim() : 'VPĐH';
+    var khoi = rawKhoi;
+    var kLower = rawKhoi.toLowerCase();
+    if (kLower.indexOf('nhà máy') !== -1 || kLower.indexOf('nha may') !== -1 || kLower.indexOf('chu lai') !== -1 || kLower === 'khoi_nhamay') {
+      khoi = 'Nhà máy';
+    } else if (kLower.indexOf('bắc') !== -1 || kLower.indexOf('bac') !== -1 || kLower === 'mb' || kLower === 'khoi_mb') {
+      khoi = 'CTTT Phía Bắc';
+    } else if (kLower.indexOf('nam') !== -1 || kLower === 'mn' || kLower === 'khoi_mn') {
+      khoi = 'CTTT Phía Nam';
+    } else if (kLower.indexOf('vpdh') !== -1 || kLower.indexOf('vpđh') !== -1 || kLower.indexOf('điều hành') !== -1 || kLower.indexOf('dieu hanh') !== -1 || kLower === 'khoi_vpdh') {
+      khoi = 'VPĐH';
+    } else if (!khoi) {
+      khoi = 'VPĐH';
+    }
+
     var maQt = String(row[colMap.maQt] || '').trim();
     var tenQt = String(row[colMap.tenQt] || '').trim();
     var maPn = String(row[colMap.maPn] || '').trim();
@@ -540,7 +567,7 @@ function readDmQtpn(ss) {
 
     mappings.push({
       stt: parseInt(row[colMap.tt], 10) || (mappings.length + 1),
-      khoi: khoi || 'VPĐH',
+      khoi: khoi,
       maQt: maQt,
       tenQt: tenQt,
       maPn: maPn,
@@ -567,7 +594,7 @@ function handleSaveDmQtpn(payload) {
 
   var headerRow = [
     'TT',
-    'Khối Đơn Vị',
+    'Đơn vị',
     'Mã Quản trị',
     'Tên Quản trị',
     'Mã pháp nhân',
@@ -575,7 +602,7 @@ function handleSaveDmQtpn(payload) {
   ];
 
   var rows = [headerRow];
-  mappings.forEach(function(item, index) {
+  mappings.forEach(function (item, index) {
     var tt = item.stt || (index + 1);
     var khoi = item.khoi || 'VPĐH';
     var maQt = item.maQt || item.maQuanti || '';
@@ -589,10 +616,10 @@ function handleSaveDmQtpn(payload) {
 
   var headerRange = sheet.getRange(1, 1, 1, 6);
   headerRange.setBackground('#00529C')
-             .setFontColor('#FFFFFF')
-             .setFontWeight('bold')
-             .setHorizontalAlignment('center')
-             .setVerticalAlignment('middle');
+    .setFontColor('#FFFFFF')
+    .setFontWeight('bold')
+    .setHorizontalAlignment('center')
+    .setVerticalAlignment('middle');
   sheet.setRowHeight(1, 35);
 
   if (rows.length > 1) {
@@ -614,6 +641,135 @@ function handleSaveDmQtpn(payload) {
 }
 
 /**
+ * API kiểm toán trực tiếp Cột B (Đơn vị) của DM_QTPN
+ */
+function handleAuditDmQtpn() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SHEET_DM_QTPN);
+  if (!sheet || sheet.getLastRow() <= 1) {
+    return jsonResponse({
+      status: 'error',
+      message: 'Sheet ' + SHEET_DM_QTPN + ' chưa có dữ liệu.'
+    });
+  }
+
+  var data = sheet.getDataRange().getValues();
+  var headers = data[0].map(function (h) { return String(h || '').trim(); });
+  var colB = 1;
+  for (var c = 0; c < headers.length; c++) {
+    var h = headers[c].toLowerCase();
+    if (h.indexOf('khối') !== -1 || (h.indexOf('đơn vị') !== -1 && h.indexOf('quản trị') === -1)) {
+      colB = c;
+      break;
+    }
+  }
+
+  var CANONICAL = ['VPĐH', 'Nhà máy', 'CTTT Phía Bắc', 'CTTT Phía Nam'];
+  var counts = {};
+  var rawList = [];
+  var whitespaceIssueCount = 0;
+  var nonCanonicalCount = 0;
+
+  for (var r = 1; r < data.length; r++) {
+    var raw = data[r][colB];
+    var rawStr = (raw === null || raw === undefined) ? '' : String(raw);
+    var trimmed = rawStr.trim();
+    if (rawStr !== trimmed) whitespaceIssueCount++;
+
+    counts[rawStr] = (counts[rawStr] || 0) + 1;
+    if (CANONICAL.indexOf(trimmed) === -1) nonCanonicalCount++;
+
+    rawList.push({
+      stt: data[r][0],
+      rawVal: rawStr,
+      trimmed: trimmed,
+      maQt: data[r][2] || '',
+      tenQt: data[r][3] || '',
+      maPn: data[r][4] || '',
+      tenPn: data[r][5] || ''
+    });
+  }
+
+  return jsonResponse({
+    status: 'success',
+    sheet: SHEET_DM_QTPN,
+    totalRows: data.length - 1,
+    headerName: headers[colB],
+    isHeaderStandard: headers[colB] === 'Đơn vị',
+    uniqueValues: counts,
+    whitespaceIssueCount: whitespaceIssueCount,
+    nonCanonicalCount: nonCanonicalCount,
+    rawList: rawList
+  });
+}
+
+/**
+ * API Chuẩn hóa 100% Cột B của DM_QTPN về đúng 4 giá trị chuẩn
+ */
+function handleNormalizeDmQtpn() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SHEET_DM_QTPN);
+  if (!sheet || sheet.getLastRow() <= 1) {
+    return jsonResponse({ status: 'error', message: 'Sheet DM_QTPN rỗng.' });
+  }
+
+  var range = sheet.getDataRange();
+  var values = range.getValues();
+  var headers = values[0];
+
+  var colB = 1;
+  for (var c = 0; c < headers.length; c++) {
+    var h = String(headers[c] || '').trim().toLowerCase();
+    if (h.indexOf('khối') !== -1 || (h.indexOf('đơn vị') !== -1 && h.indexOf('quản trị') === -1)) {
+      colB = c;
+      break;
+    }
+  }
+
+  values[0][colB] = 'Đơn vị';
+
+  var updatedCount = 0;
+  var beforeCounts = {};
+  var afterCounts = { 'VPĐH': 0, 'Nhà máy': 0, 'CTTT Phía Bắc': 0, 'CTTT Phía Nam': 0 };
+
+  for (var r = 1; r < values.length; r++) {
+    var raw = String(values[r][colB] || '').trim();
+    beforeCounts[raw] = (beforeCounts[raw] || 0) + 1;
+
+    var lower = raw.toLowerCase();
+    var canonical = 'VPĐH';
+
+    if (lower.indexOf('nhà máy') !== -1 || lower.indexOf('nha may') !== -1 || lower.indexOf('chu lai') !== -1 || lower === 'khoi_nhamay') {
+      canonical = 'Nhà máy';
+    } else if (lower.indexOf('bắc') !== -1 || lower.indexOf('bac') !== -1 || lower === 'mb' || lower === 'khoi_mb') {
+      canonical = 'CTTT Phía Bắc';
+    } else if (lower.indexOf('nam') !== -1 || lower === 'mn' || lower === 'khoi_mn') {
+      canonical = 'CTTT Phía Nam';
+    } else {
+      canonical = 'VPĐH';
+    }
+
+    afterCounts[canonical] = (afterCounts[canonical] || 0) + 1;
+    if (values[r][colB] !== canonical) {
+      values[r][colB] = canonical;
+      updatedCount++;
+    }
+  }
+
+  range.setValues(values);
+  sheet.autoResizeColumns(1, values[0].length);
+
+  return jsonResponse({
+    status: 'success',
+    message: 'Đã chuẩn hóa thành công ' + (values.length - 1) + ' dòng của DM_QTPN về đúng 4 giá trị chuẩn!',
+    totalRows: values.length - 1,
+    updatedRowsCount: updatedCount,
+    beforeCounts: beforeCounts,
+    afterCounts: afterCounts
+  });
+}
+
+/**
  * =========================================================================================
  * XỬ LÝ ĐỊNH BIÊN & NHÂN SỰ CB-NV (DM_CBNV)
  * =========================================================================================
@@ -625,12 +781,12 @@ function readDmCbnv(ss) {
   var data = sheet.getDataRange().getValues();
   if (data.length <= 1) return [];
 
-  var headers = data[0].map(function(h) { return String(h || '').trim().toLowerCase(); });
+  var headers = data[0].map(function (h) { return String(h || '').trim().toLowerCase(); });
   var colMap = { stt: 0, khoi: -1, maQt: -1, tenQt: -1, maPn: -1, tenPn: -1, nam: -1, thang: -1, dinhBien: -1, thucTe: -1, ghiChu: -1 };
 
   for (var c = 0; c < headers.length; c++) {
     var h = headers[c];
-    if (h.indexOf('khối') !== -1 || h.indexOf('khoi') !== -1) colMap.khoi = c;
+    if (h.indexOf('khối') !== -1 || h.indexOf('khoi') !== -1 || (h.indexOf('đơn vị') !== -1 && h.indexOf('quản trị') === -1)) colMap.khoi = c;
     else if (h.indexOf('mã quản trị') !== -1 || h.indexOf('ma qt') !== -1) colMap.maQt = c;
     else if (h.indexOf('tên quản trị') !== -1 || h.indexOf('ten qt') !== -1) colMap.tenQt = c;
     else if (h.indexOf('mã đvcs') !== -1 || h.indexOf('mã pn') !== -1 || h.indexOf('mã pháp nhân') !== -1) colMap.maPn = c;
@@ -650,18 +806,33 @@ function readDmCbnv(ss) {
   var list = [];
   for (var r = 1; r < data.length; r++) {
     var row = data[r];
-    if (!row || row.every(function(cell) { return cell === '' || cell === null; })) continue;
+    if (!row || row.every(function (cell) { return cell === '' || cell === null; })) continue;
 
     var maPn = colMap.maPn !== -1 ? String(row[colMap.maPn] || '').trim() : '';
     var tenPn = colMap.tenPn !== -1 ? String(row[colMap.tenPn] || '').trim() : '';
     if (!maPn && !tenPn) continue;
+
+    var rawKhoi = colMap.khoi !== -1 ? String(row[colMap.khoi] || '').trim() : 'VPĐH';
+    var khoi = rawKhoi;
+    var kLower = rawKhoi.toLowerCase();
+    if (kLower.indexOf('nhà máy') !== -1 || kLower.indexOf('nha may') !== -1 || kLower.indexOf('chu lai') !== -1 || kLower === 'khoi_nhamay') {
+      khoi = 'Nhà máy';
+    } else if (kLower.indexOf('bắc') !== -1 || kLower.indexOf('bac') !== -1 || kLower === 'mb' || kLower === 'khoi_mb') {
+      khoi = 'CTTT Phía Bắc';
+    } else if (kLower.indexOf('nam') !== -1 || kLower === 'mn' || kLower === 'khoi_mn') {
+      khoi = 'CTTT Phía Nam';
+    } else if (kLower.indexOf('vpdh') !== -1 || kLower.indexOf('vpđh') !== -1 || kLower.indexOf('điều hành') !== -1 || kLower.indexOf('dieu hanh') !== -1 || kLower === 'khoi_vpdh') {
+      khoi = 'VPĐH';
+    } else if (!khoi) {
+      khoi = 'VPĐH';
+    }
 
     var rawThang = colMap.thang !== -1 ? row[colMap.thang] : '';
     var thangVal = parseInt(String(rawThang).replace(/[^0-9]/g, ''), 10) || 1;
 
     list.push({
       stt: parseInt(row[colMap.stt], 10) || (list.length + 1),
-      khoi: colMap.khoi !== -1 ? String(row[colMap.khoi] || '').trim() : 'VPĐH',
+      khoi: khoi,
       maQt: colMap.maQt !== -1 ? String(row[colMap.maQt] || '').trim() : '',
       tenQt: colMap.tenQt !== -1 ? String(row[colMap.tenQt] || '').trim() : '',
       maPn: maPn,
@@ -726,21 +897,21 @@ function handleSaveDmCbnv(payload) {
   } else {
     // Mode upsert: Map theo Khóa duy nhất (Mã ĐVCS + Năm + Tháng)
     var recordMap = {};
-    existingRows.forEach(function(rec) {
+    existingRows.forEach(function (rec) {
       var key = (String(rec.maPn || rec.code || '').trim() + '_' + (rec.nam || 2026) + '_' + (rec.thang || 1)).toUpperCase();
       recordMap[key] = rec;
     });
 
-    list.forEach(function(item) {
+    list.forEach(function (item) {
       var key = (String(item.maPn || item.code || '').trim() + '_' + (item.nam || item.year || 2026) + '_' + (item.thang || item.month || 1)).toUpperCase();
       recordMap[key] = item; // Ghi đè hoặc thêm mới
     });
 
-    finalRecords = Object.keys(recordMap).map(function(k) { return recordMap[k]; });
+    finalRecords = Object.keys(recordMap).map(function (k) { return recordMap[k]; });
   }
 
   // Sắp xếp dữ liệu: Theo Năm tăng dần -> Tháng tăng dần -> Mã ĐVCS
-  finalRecords.sort(function(a, b) {
+  finalRecords.sort(function (a, b) {
     var ya = parseInt(a.nam || a.year || 2026, 10);
     var yb = parseInt(b.nam || b.year || 2026, 10);
     if (ya !== yb) return ya - yb;
@@ -755,7 +926,7 @@ function handleSaveDmCbnv(payload) {
   });
 
   var rows = [headerRow];
-  finalRecords.forEach(function(item, idx) {
+  finalRecords.forEach(function (item, idx) {
     rows.push([
       idx + 1,
       item.khoi || 'VPĐH',
@@ -776,10 +947,10 @@ function handleSaveDmCbnv(payload) {
 
   var headerRange = sheet.getRange(1, 1, 1, 11);
   headerRange.setBackground('#00529C')
-             .setFontColor('#FFFFFF')
-             .setFontWeight('bold')
-             .setHorizontalAlignment('center')
-             .setVerticalAlignment('middle');
+    .setFontColor('#FFFFFF')
+    .setFontWeight('bold')
+    .setHorizontalAlignment('center')
+    .setVerticalAlignment('middle');
   sheet.setRowHeight(1, 35);
 
   if (rows.length > 1) {
@@ -855,7 +1026,7 @@ function handleSaveCostData(payload) {
 
   var preservedRows = [];
   if (mode === 'replace_year_entity' && existingValues.length > 0) {
-    preservedRows = existingValues.filter(function(row) {
+    preservedRows = existingValues.filter(function (row) {
       var rowEntity = String(row[1] || '').trim(); // Cột 2: Mã ĐVCS
       var rowYear = parseInt(row[11], 10);        // Cột 12: Năm
       if (entityCode && year) {
@@ -870,11 +1041,11 @@ function handleSaveCostData(payload) {
   }
 
   // Chuẩn hóa dữ liệu mới thành mảng 2 chiều theo đúng 26 cột COST_COLUMNS
-  var formattedNewRows = newRows.map(function(item) {
+  var formattedNewRows = newRows.map(function (item) {
     if (Array.isArray(item)) return item;
 
-    var months = item.months || [0,0,0,0,0,0,0,0,0,0,0,0];
-    var totalVal = typeof item.total === 'number' ? item.total : months.reduce(function(a,b){ return a + (b||0); }, 0);
+    var months = item.months || [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    var totalVal = typeof item.total === 'number' ? item.total : months.reduce(function (a, b) { return a + (b || 0); }, 0);
 
     return [
       item.stt || '',
@@ -909,7 +1080,7 @@ function handleSaveCostData(payload) {
   var finalDataRows = preservedRows.concat(formattedNewRows);
 
   // Đánh lại số thứ tự STT
-  finalDataRows.forEach(function(r, idx) {
+  finalDataRows.forEach(function (r, idx) {
     r[0] = idx + 1;
   });
 
@@ -925,10 +1096,10 @@ function handleSaveCostData(payload) {
   // Định dạng tiêu đề THACO Royal Blue #00529C
   var headerRange = sheet.getRange(1, 1, 1, numCols);
   headerRange.setBackground('#00529C')
-             .setFontColor('#FFFFFF')
-             .setFontWeight('bold')
-             .setHorizontalAlignment('center')
-             .setVerticalAlignment('middle');
+    .setFontColor('#FFFFFF')
+    .setFontWeight('bold')
+    .setHorizontalAlignment('center')
+    .setVerticalAlignment('middle');
   sheet.setRowHeight(1, 35);
 
   if (numRows > 1) {
@@ -949,7 +1120,7 @@ function handleSaveCostData(payload) {
   sheet.setFrozenColumns(5); // Cố định 5 cột đầu (STT, Mã ĐVCS, Đơn vị, Mã B7, Tên Khoản Mục)
   sheet.autoResizeColumns(1, numCols);
 
-  var totalMoney = formattedNewRows.reduce(function(acc, r) { return acc + (Number(r[25]) || 0); }, 0);
+  var totalMoney = formattedNewRows.reduce(function (acc, r) { return acc + (Number(r[25]) || 0); }, 0);
 
   return jsonResponse({
     status: 'success',
@@ -1005,6 +1176,120 @@ function formatDmQtpnSheet() {
   SpreadsheetApp.getActiveSpreadsheet().toast('Đã định dạng lại sheet DM_QTPN!', 'THACO AUTO', 3);
 }
 
+function auditDmQtpnColumnB() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SHEET_DM_QTPN);
+  var ui = SpreadsheetApp.getUi();
+  if (!sheet || sheet.getLastRow() <= 1) {
+    ui.alert('⚠️ Sheet DM_QTPN chưa có dữ liệu!');
+    return;
+  }
+  var data = sheet.getDataRange().getValues();
+  var headers = data[0];
+  var colB = 1;
+  for (var c = 0; c < headers.length; c++) {
+    var h = String(headers[c] || '').trim().toLowerCase();
+    if (h.indexOf('khối') !== -1 || (h.indexOf('đơn vị') !== -1 && h.indexOf('quản trị') === -1)) {
+      colB = c;
+      break;
+    }
+  }
+
+  var CANONICAL = ['VPĐH', 'Nhà máy', 'CTTT Phía Bắc', 'CTTT Phía Nam'];
+  var counts = {};
+  var whitespaceIssue = 0;
+  var nonCanonical = 0;
+
+  for (var r = 1; r < data.length; r++) {
+    var val = data[r][colB];
+    var str = (val === null || val === undefined) ? '' : String(val);
+    var trimmed = str.trim();
+    if (str !== trimmed) whitespaceIssue++;
+    counts[str] = (counts[str] || 0) + 1;
+    if (CANONICAL.indexOf(trimmed) === -1) nonCanonical++;
+  }
+
+  var msg = '📊 KẾT QUẢ KIỂM TOÁN CỘT B TRONG SHEET DM_QTPN:\n\n';
+  msg += '• Tổng số dòng: ' + (data.length - 1) + '\n';
+  msg += '• Tiêu đề cột hiện tại: "' + headers[colB] + '" ' + (headers[colB] === 'Đơn vị' ? '✅ Đúng chuẩn' : '⚠️ Cần đổi thành "Đơn vị"') + '\n';
+  msg += '• Dòng có khoảng trắng thừa đầu/cuối: ' + whitespaceIssue + '\n';
+  msg += '• Dòng có giá trị chưa chuẩn: ' + nonCanonical + '\n\n';
+  msg += '📋 DANH SÁCH CÁC GIÁ TRỊ ĐANG TỒN TẠI (UNIQUE):\n';
+  for (var k in counts) {
+    var isStd = CANONICAL.indexOf(k.trim()) !== -1;
+    msg += '  - "' + (k === '' ? '(Trống)' : k) + '": ' + counts[k] + ' dòng ' + (isStd ? '✅' : '❌ Chưa chuẩn') + '\n';
+  }
+  msg += '\n👉 Bạn có thể chọn menu: "🚗 THACO AUTO" > "⚡ Tự động chuẩn hóa 100% Cột B về 4 giá trị chuẩn" để tự động sửa toàn bộ!';
+  ui.alert('KIỂM TOÁN CỘT B DM_QTPN', msg, ui.ButtonSet.OK);
+}
+
+function normalizeDmQtpnColumnB() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SHEET_DM_QTPN);
+  var ui = SpreadsheetApp.getUi();
+  if (!sheet || sheet.getLastRow() <= 1) {
+    ui.alert('⚠️ Sheet DM_QTPN chưa có dữ liệu!');
+    return;
+  }
+  var confirm = ui.alert(
+    'XÁC NHẬN CHUẨN HÓA CỘT B (ĐƠN VỊ)',
+    'Thao tác này sẽ chuẩn hóa tiêu đề Cột B thành "Đơn vị" và toàn bộ dữ liệu Cột B của ' + (sheet.getLastRow() - 1) + ' dòng về đúng 4 giá trị chuẩn:\n- VPĐH\n- Nhà máy\n- CTTT Phía Bắc\n- CTTT Phía Nam\n\nBạn có chắc chắn muốn thực hiện?',
+    ui.ButtonSet.YES_NO
+  );
+  if (confirm !== ui.Button.YES) return;
+
+  var range = sheet.getDataRange();
+  var values = range.getValues();
+  var headers = values[0];
+  var colB = 1;
+  for (var c = 0; c < headers.length; c++) {
+    var h = String(headers[c] || '').trim().toLowerCase();
+    if (h.indexOf('khối') !== -1 || (h.indexOf('đơn vị') !== -1 && h.indexOf('quản trị') === -1)) {
+      colB = c;
+      break;
+    }
+  }
+
+  values[0][colB] = 'Đơn vị';
+  var updatedCount = 0;
+  var counts = { 'VPĐH': 0, 'Nhà máy': 0, 'CTTT Phía Bắc': 0, 'CTTT Phía Nam': 0 };
+
+  for (var r = 1; r < values.length; r++) {
+    var raw = String(values[r][colB] || '').trim();
+    var lower = raw.toLowerCase();
+    var canonical = 'VPĐH';
+
+    if (lower.indexOf('nhà máy') !== -1 || lower.indexOf('nha may') !== -1 || lower.indexOf('chu lai') !== -1 || lower === 'khoi_nhamay') {
+      canonical = 'Nhà máy';
+    } else if (lower.indexOf('bắc') !== -1 || lower.indexOf('bac') !== -1 || lower === 'mb' || lower === 'khoi_mb') {
+      canonical = 'CTTT Phía Bắc';
+    } else if (lower.indexOf('nam') !== -1 || lower === 'mn' || lower === 'khoi_mn') {
+      canonical = 'CTTT Phía Nam';
+    } else {
+      canonical = 'VPĐH';
+    }
+
+    counts[canonical] = (counts[canonical] || 0) + 1;
+    if (values[r][colB] !== canonical) {
+      values[r][colB] = canonical;
+      updatedCount++;
+    }
+  }
+
+  range.setValues(values);
+  sheet.autoResizeColumns(1, values[0].length);
+
+  var resMsg = '🎉 ĐÃ CHUẨN HÓA HOÀN TẤT!\n\n';
+  resMsg += '• Số dòng đã cập nhật lại giá trị: ' + updatedCount + '/' + (values.length - 1) + '\n';
+  resMsg += '• Tiêu đề Cột B: "Đơn vị"\n\n';
+  resMsg += 'Phân bổ 4 giá trị chuẩn:\n';
+  resMsg += '  - VPĐH: ' + counts['VPĐH'] + ' dòng\n';
+  resMsg += '  - Nhà máy: ' + counts['Nhà máy'] + ' dòng\n';
+  resMsg += '  - CTTT Phía Bắc: ' + counts['CTTT Phía Bắc'] + ' dòng\n';
+  resMsg += '  - CTTT Phía Nam: ' + counts['CTTT Phía Nam'] + ' dòng\n';
+  ui.alert('KẾT QUẢ CHUẨN HÓA', resMsg, ui.ButtonSet.OK);
+}
+
 function checkDmCbnvStructure() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName(SHEET_DM_CBNV);
@@ -1026,7 +1311,7 @@ function formatDmCbnvSheet() {
 
 function initCostSheets() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  COST_SHEETS.forEach(function(sName) {
+  COST_SHEETS.forEach(function (sName) {
     var sh = ss.getSheetByName(sName);
     if (!sh) {
       sh = ss.insertSheet(sName);
@@ -1047,7 +1332,7 @@ function initCostSheets() {
 
 function formatAllCostSheets() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  COST_SHEETS.forEach(function(sName) {
+  COST_SHEETS.forEach(function (sName) {
     var sh = ss.getSheetByName(sName);
     if (sh && sh.getLastRow() > 0) {
       sh.autoResizeColumns(1, COST_COLUMNS.length);

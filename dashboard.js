@@ -859,7 +859,7 @@
         else if (quickType === 'Q3') months = [7, 8, 9];
         else if (quickType === 'Q4') months = [10, 11, 12];
         else if (quickType === 'YTD') {
-            const actual = (window.THACO_APP && window.THACO_APP.state && window.THACO_APP.state.actualMonths) || [1, 2, 3, 4, 5, 6, 7];
+            const actual = (window.THACO_APP && window.THACO_APP.state && window.THACO_APP.state.actualMonths) || [1, 2, 3, 4, 5, 6];
             months = [...actual];
         }
 
@@ -2428,7 +2428,7 @@
         if (!app || !app.calculateReportData) return null;
 
         const calcedRows = app.calculateReportData();
-        const actualMonths = (app.state && app.state.actualMonths) || [1, 2, 3, 4, 5, 6, 7];
+        const actualMonths = (app.state && app.state.actualMonths) || [1, 2, 3, 4, 5, 6];
 
         if (!actualMonths || actualMonths.length < 3) {
             return null;
